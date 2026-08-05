@@ -1,0 +1,55 @@
+{
+  "verified_at": "2026-08-03",
+  "projects": [
+    {
+      "language": "c",
+      "path": "fixture/projects/redis",
+      "repository": "redis/redis",
+      "commit": "de3ea25a9f486a44467cad0628bdb2d0a36aabf0",
+      "stars_at_verification": 74900,
+      "source_file_count": 278,
+      "extensions": [".c", ".h"],
+      "excluded_paths": ["deps/"]
+    },
+    {
+      "language": "cpp",
+      "path": "fixture/projects/protobuf",
+      "repository": "protocolbuffers/protobuf",
+      "commit": "0e436a47e854982213b4c9a72ca7f48c29bd7b88",
+      "stars_at_verification": 71300,
+      "source_file_count": 1135,
+      "extensions": [".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx"],
+      "excluded_paths": ["third_party/"]
+    },
+    {
+      "language": "java",
+      "path": "fixture/projects/junit-framework",
+      "repository": "junit-team/junit-framework",
+      "commit": "2dd4145a64edfe4a97d341ac1ff592d4e10f4a67",
+      "stars_at_verification": 7000,
+      "source_file_count": 1738,
+      "extensions": [".java"],
+      "excluded_paths": []
+    },
+    {
+      "language": "go",
+      "path": "fixture/projects/go-git",
+      "repository": "go-git/go-git",
+      "commit": "cf4d91c78c3248aae6b65f86c5810166bfb334c2",
+      "stars_at_verification": 7400,
+      "source_file_count": 690,
+      "extensions": [".go"],
+      "excluded_paths": ["vendor/"]
+    },
+    {
+      "language": "python",
+      "path": "fixture/projects/django",
+      "repository": "django/django",
+      "commit": "2cace96be6d64b7dde7eb66d3ffc2c7f08ef644f",
+      "stars_at_verification": 88200,
+      "source_file_count": 2927,
+      "extensions": [".py", ".pyi"],
+      "excluded_paths": []
+    }
+  ]
+}

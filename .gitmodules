@@ -1,0 +1,15 @@
+[submodule "01-parser/test/e2e/fixture/projects/go-git"]
+	path = 01-parser/test/e2e/fixture/projects/go-git
+	url = https://github.com/go-git/go-git.git
+[submodule "01-parser/test/e2e/fixture/projects/junit-framework"]
+	path = 01-parser/test/e2e/fixture/projects/junit-framework
+	url = https://github.com/junit-team/junit-framework.git
+[submodule "01-parser/test/e2e/fixture/projects/redis"]
+	path = 01-parser/test/e2e/fixture/projects/redis
+	url = https://github.com/redis/redis.git
+[submodule "01-parser/test/e2e/fixture/projects/protobuf"]
+	path = 01-parser/test/e2e/fixture/projects/protobuf
+	url = https://github.com/protocolbuffers/protobuf.git
+[submodule "01-parser/test/e2e/fixture/projects/django"]
+	path = 01-parser/test/e2e/fixture/projects/django
+	url = https://github.com/django/django.git
