@@ -1,115 +1,103 @@
 //go:build e2e
 
-// Package e2e 是 Parser 模块的端到端测试包，对固定 commit 的真实开源项目 submodule 做全量解析。
-// 测试运行时不访问网络，全部输入来自已初始化的 submodule。使用 e2e build tag 隔离，默认不执行。
+// Package e2e 使用项目根目录共享的固定开源项目语料验证 Parser 的端到端行为。
 package e2e
 
 import (
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
-// supportedExts 是 Parser 支持解析的扩展名集合，E2E 只纳入其中的文件，避免对不支持扩展名产生系统失败。
-var supportedExts = map[string]bool{
-	".c": true, ".h": true, ".cc": true, ".cpp": true, ".cxx": true, ".c++": true,
-	".hh": true, ".hpp": true, ".hxx": true, ".ipp": true, ".tpp": true,
-	".java": true, ".go": true, ".py": true, ".pyi": true,
+// parserExpected 描述 Parser 对单个共享项目的明确预期。
+type parserExpected struct {
+	// TestPurpose 直接说明该 expected 验证的功能。
+	TestPurpose string `json:"test_purpose"`
+	// ProjectID 指向共享语料中的项目标识。
+	ProjectID string `json:"project_id"`
+	// Assertions 保存必须逐项满足的 Parser 结果。
+	Assertions parserAssertions `json:"assertions"`
 }
 
-// projectLock 对应 projects.lock.json 的顶层结构，锁定 E2E 使用的开源项目集合。
-type projectLock struct {
-	// VerifiedAt 是清单核验日期。
-	VerifiedAt string `json:"verified_at"`
-	// Projects 是锁定的项目条目列表。
-	Projects []projectEntry `json:"projects"`
+// parserAssertions 保存 Parser E2E 的稳定断言字段。
+type parserAssertions struct {
+	// SourceFiles 是必须纳入解析的源码文件数。
+	SourceFiles int `json:"source_files"`
+	// SuccessfulTrees 是必须成功生成的语法树数量。
+	SuccessfulTrees int `json:"successful_trees"`
+	// SystemFailures 是允许的系统失败数量。
+	SystemFailures int `json:"system_failures"`
+	// TotalBytes 是固定语料纳入文件的总字节数。
+	TotalBytes int64 `json:"total_bytes"`
+	// DiagnosticFiles 是包含 ERROR 或 MISSING 诊断的文件数。
+	DiagnosticFiles int `json:"diagnostic_files"`
+	// DiagnosticFilesByExtension 按扩展名锁定诊断文件数。
+	DiagnosticFilesByExtension map[string]int `json:"diagnostic_files_by_extension"`
+	// SyntaxTreeSHA256 是全部规范化语法树的稳定摘要。
+	SyntaxTreeSHA256 string `json:"syntax_tree_sha256"`
+	// DiagnosticsSHA256 是全部规范化诊断的稳定摘要。
+	DiagnosticsSHA256 string `json:"diagnostics_sha256"`
 }
 
-// projectEntry 描述一个被锁定的开源项目 submodule 及其校验信息。
-type projectEntry struct {
-	// Language 是项目主语言标识。
-	Language string `json:"language"`
-	// Path 是相对 E2E 测试目录的 submodule 路径。
-	Path string `json:"path"`
-	// Repository 是 GitHub 仓库标识。
-	Repository string `json:"repository"`
-	// Commit 是锁定的完整提交哈希。
-	Commit string `json:"commit"`
-	// StarsAtVerification 是核验时的 Star 数。
-	StarsAtVerification int `json:"stars_at_verification"`
-	// SourceFileCount 是过滤后目标语言源码文件数。
-	SourceFileCount int `json:"source_file_count"`
-	// Extensions 是计入统计的源码扩展名。
-	Extensions []string `json:"extensions"`
-	// ExcludedPaths 是排除的路径前缀及其原因由清单另行说明。
-	ExcludedPaths []string `json:"excluded_paths"`
+// resourceBaselineExpected 描述 Parser 多轮资源测试的目的、语料范围和硬性断言。
+type resourceBaselineExpected struct {
+	// TestPurpose 直接说明资源基线验证的功能。
+	TestPurpose string `json:"test_purpose"`
+	// ProjectIDs 按共享清单顺序列出必须覆盖的项目。
+	ProjectIDs []string `json:"project_ids"`
+	// Assertions 保存必须满足的资源退化边界。
+	Assertions resourceBaselineAssertions `json:"assertions"`
 }
 
-// loadLock 读取并解析 projects.lock.json。
-func loadLock(t *testing.T) projectLock {
+// resourceBaselineAssertions 保存 Parser 多轮资源测试的固定断言。
+type resourceBaselineAssertions struct {
+	// Rounds 是必须连续执行的全量解析轮数。
+	Rounds int `json:"rounds"`
+	// SourceFilesPerRound 是每轮必须读取并解析的源码文件数。
+	SourceFilesPerRound int `json:"source_files_per_round"`
+	// SuccessfulTreesPerRound 是每轮必须成功生成并访问的语法树数量。
+	SuccessfulTreesPerRound int `json:"successful_trees_per_round"`
+	// SystemFailures 是全部轮次允许的系统失败总数。
+	SystemFailures int `json:"system_failures"`
+	// MaxElapsedRatio 是最长轮次与最短轮次允许的最大耗时比。
+	MaxElapsedRatio float64 `json:"max_elapsed_ratio"`
+	// MaxHeapSysBytes 是各轮结束时允许的最大 Go 堆保留字节数。
+	MaxHeapSysBytes uint64 `json:"max_heap_sys_bytes"`
+}
+
+// loadParserExpected 读取指定共享项目对应的 Parser expected。
+func loadParserExpected(t *testing.T, projectID string) parserExpected {
 	t.Helper()
-	raw, err := os.ReadFile(filepath.Join("fixture", "projects.lock.json"))
+	raw, err := os.ReadFile(filepath.Join("fixture", "expected", projectID+".json"))
 	if err != nil {
-		t.Fatalf("读取锁定清单失败: %v", err)
+		t.Fatalf("读取 Parser E2E expected 失败 %s: %v", projectID, err)
 	}
-	var lock projectLock
-	if err := json.Unmarshal(raw, &lock); err != nil {
-		t.Fatalf("解析锁定清单失败: %v", err)
+	var expected parserExpected
+	if err := json.Unmarshal(raw, &expected); err != nil {
+		t.Fatalf("解析 Parser E2E expected 失败 %s: %v", projectID, err)
 	}
-	return lock
+	if expected.ProjectID != projectID || expected.TestPurpose == "" {
+		t.Fatalf("Parser E2E expected 缺少明确测试目的或项目标识 %s", projectID)
+	}
+	return expected
 }
 
-// headCommit 返回指定仓库目录当前 HEAD 的完整提交哈希。
-func headCommit(t *testing.T, repoDir string) string {
+// loadResourceBaselineExpected 读取 Parser 多轮资源测试的独立 expected。
+func loadResourceBaselineExpected(t *testing.T) resourceBaselineExpected {
 	t.Helper()
-	out, err := exec.Command("git", "-C", repoDir, "rev-parse", "HEAD").Output()
+	raw, err := os.ReadFile(filepath.Join("fixture", "expected", "resource-baseline.json"))
 	if err != nil {
-		t.Fatalf("读取 %s HEAD 失败: %v", repoDir, err)
+		t.Fatalf("读取 Parser 资源基线 expected 失败: %v", err)
 	}
-	return strings.TrimSpace(string(out))
-}
-
-// trackedSourceFiles 用 git ls-files 收集仓库中受跟踪的目标语言源码文件（绝对路径），
-// 仅纳入既在项目声明扩展名内、又被 Parser 支持的扩展名，并排除声明的路径前缀。
-func trackedSourceFiles(t *testing.T, repoDir string, declaredExts []string, excluded []string) []string {
-	t.Helper()
-	extSet := map[string]bool{}
-	for _, e := range declaredExts {
-		e = strings.ToLower(e)
-		if supportedExts[e] {
-			extSet[e] = true
-		}
+	var expected resourceBaselineExpected
+	if err := json.Unmarshal(raw, &expected); err != nil {
+		t.Fatalf("解析 Parser 资源基线 expected 失败: %v", err)
 	}
-	out, err := exec.Command("git", "-C", repoDir, "ls-files").Output()
-	if err != nil {
-		t.Fatalf("git ls-files %s 失败: %v", repoDir, err)
+	if expected.TestPurpose == "" || len(expected.ProjectIDs) == 0 || expected.Assertions.Rounds < 2 ||
+		expected.Assertions.SourceFilesPerRound <= 0 || expected.Assertions.SuccessfulTreesPerRound <= 0 ||
+		expected.Assertions.MaxElapsedRatio <= 1 || expected.Assertions.MaxHeapSysBytes == 0 {
+		t.Fatal("Parser 资源基线 expected 缺少明确测试目的、项目范围或多轮断言")
 	}
-	var files []string
-	for _, line := range strings.Split(string(out), "\n") {
-		rel := strings.TrimSpace(line)
-		if rel == "" {
-			continue
-		}
-		if !extSet[strings.ToLower(filepath.Ext(rel))] {
-			continue
-		}
-		if isExcluded(rel, excluded) {
-			continue
-		}
-		files = append(files, filepath.Join(repoDir, rel))
-	}
-	return files
-}
-
-// isExcluded 报告相对路径是否命中任一排除前缀。
-func isExcluded(rel string, excluded []string) bool {
-	for _, prefix := range excluded {
-		if prefix != "" && strings.HasPrefix(rel, prefix) {
-			return true
-		}
-	}
-	return false
+	return expected
 }
