@@ -4,9 +4,9 @@ import "context"
 
 // SourceFile 表示一次解析所需的源码文件及其基本信息。
 type SourceFile struct {
-	// ID 是文件在当前分析任务中的稳定标识。
+	// ID 是调用方分配的文件编号，只要求在同一分析任务内唯一，不保证跨运行稳定，不得写入快照或 golden。
 	ID FileID
-	// Path 是用于诊断、源码定位和语言识别的项目内文件路径，必须包含可识别的扩展名。
+	// Path 是以 / 分隔的项目内相对路径，必须包含可识别的扩展名，用于语言识别、诊断定位和在快照中标识文件。
 	Path string
 	// Content 保存待解析的 UTF-8 源码内容，在语法树存活期间必须保持不可变。
 	Content []byte
@@ -77,8 +77,10 @@ type Parser interface {
 type SyntaxTree interface {
 	// Language 返回该语法树对应的编程语言。
 	Language() Language
-	// FileID 返回该语法树对应的文件标识。
+	// FileID 返回该语法树对应的文件编号。
 	FileID() FileID
+	// Path 返回解析时传入的项目内相对路径。
+	Path() string
 	// Root 返回语法树的根节点。
 	Root() Node
 	// Close 释放语法树持有的底层资源，重复调用安全且返回稳定结果。

@@ -88,9 +88,10 @@ func parseAll(t *testing.T, parserInstance parser.Parser, repositoryDirectory st
 		if err != nil {
 			t.Fatalf("计算共享源码相对路径失败 %s: %v", path, err)
 		}
-		writeHashString(treeHasher, filepath.ToSlash(relative))
-		writeHashString(diagnosticHasher, filepath.ToSlash(relative))
-		success, diagnostics, elapsed := parseAndHashOne(parserInstance, parser.FileID(index+1), path, content, treeHasher, diagnosticHasher)
+		relative = filepath.ToSlash(relative)
+		writeHashString(treeHasher, relative)
+		writeHashString(diagnosticHasher, relative)
+		success, diagnostics, elapsed := parseAndHashOne(parserInstance, parser.FileID(index+1), relative, content, treeHasher, diagnosticHasher)
 		if elapsed > metrics.MaxFileElapsed {
 			metrics.MaxFileElapsed = elapsed
 		}
@@ -110,7 +111,7 @@ func parseAll(t *testing.T, parserInstance parser.Parser, repositoryDirectory st
 	return metrics
 }
 
-// parseAndHashOne 解析单个文件并把规范化语法树和诊断写入项目摘要。
+// parseAndHashOne 解析单个文件并把规范化语法树和诊断写入项目摘要，path 为项目内相对路径。
 func parseAndHashOne(parserInstance parser.Parser, fileID parser.FileID, path string, content []byte, treeHasher hash.Hash, diagnosticHasher hash.Hash) (success bool, diagnosticCount int, elapsed time.Duration) {
 	defer func() {
 		if recover() != nil {

@@ -12,8 +12,10 @@ type syntaxTree struct {
 	mu sync.Mutex
 	// lang 是该语法树对应的编程语言。
 	lang Language
-	// fileID 是该语法树对应的文件标识。
+	// fileID 是该语法树对应的文件编号。
 	fileID FileID
+	// path 是解析时传入的项目内相对路径。
+	path string
 	// content 是解析所用的源码内容，在树存活期间保持不可变，供节点取源码切片。
 	content []byte
 	// tree 是底层 Tree-sitter 树，关闭后置为 nil。
@@ -27,9 +29,14 @@ func (t *syntaxTree) Language() Language {
 	return t.lang
 }
 
-// FileID 返回该语法树对应的文件标识。
+// FileID 返回该语法树对应的文件编号。
 func (t *syntaxTree) FileID() FileID {
 	return t.fileID
+}
+
+// Path 返回解析时传入的项目内相对路径。
+func (t *syntaxTree) Path() string {
+	return t.path
 }
 
 // Root 返回语法树的根节点；若语法树已关闭，返回的节点在访问时统一报告 ErrTreeClosed。

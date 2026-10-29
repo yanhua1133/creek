@@ -152,9 +152,9 @@ const (
 
 // SourceFile 表示一次解析所需的源码文件及其基本信息。
 type SourceFile struct {
-    // ID 是文件在当前分析任务中的稳定标识。
+    // ID 是调用方分配的文件编号，只要求在同一分析任务内唯一，用于在内存中关联节点、诊断和下游结果。
     ID FileID
-    // Path 是用于诊断和源码定位的项目内文件路径。
+    // Path 是以 / 分隔的项目内相对路径，用于语言识别、诊断定位和在快照中标识文件。
     Path string
     // Content 保存待解析的 UTF-8 源码内容。
     Content []byte
@@ -200,6 +200,12 @@ type Diagnostic struct {
 - `ParseResult.Tree` 非空不代表语法完全正确，必须结合诊断判断。
 - Tree-sitter 节点 ID 不能作为跨进程或持久化身份；common AST 必须生成自己的稳定 ID。
 
+文件标识规则：
+
+- `FileID` 由调用方分配，Parser 不生成也不修改，原样交给 `SyntaxTree.FileID()`。它只保证在同一分析任务内唯一，不保证跨运行稳定：同一批文件换一种编号顺序，或增删一个文件，编号都可能变化。
+- `Path` 由调用方提供，Parser 原样交给 `SyntaxTree.Path()`。它必须是以 `/` 分隔的项目内相对路径，不得是绝对路径，保证同一份源码在任何机器、任何运行中都相同。
+- 内存中关联节点、诊断和下游结果时使用 `FileID`；快照、golden 和 expected 中标识文件时使用 `Path`，不得写入 `FileID`。
+
 ## 对外接口
 
 ```go
@@ -213,8 +219,10 @@ type Parser interface {
 type SyntaxTree interface {
     // Language 返回该语法树对应的编程语言。
     Language() Language
-    // FileID 返回该语法树对应的文件标识。
+    // FileID 返回该语法树对应的文件编号。
     FileID() FileID
+    // Path 返回解析时传入的项目内相对路径。
+    Path() string
     // Root 返回语法树的根节点。
     Root() Node
     // Close 释放语法树持有的底层资源。
@@ -585,6 +593,7 @@ protobuf 的 `objectivec/` 目录是 Objective-C 源码（`.h` 扩展名），�
 - ✅ 根目录共享五个 E2E Git submodule 并记录真实 commit、Star 数和源码文件数，Parser 模块不再持有重复副本。
 - ✅ 运行 E2E 全量解析测试：5 个真实项目共 6768 个文件，系统失败=0，全部生成语法树；每个项目的计数、诊断分布、完整 CST SHA-256 和诊断 SHA-256 均与独立 expected 精确一致。含 ERROR 或 MISSING 节点的文件占比：go-git 0/690=0%、django 0/2927=0%、junit 6/1738=0.3%、redis 53/278=19.1%、protobuf 443/1135=39.0%。
 - ✅ 完成多轮资源基线 `TestE2EResourceBaseline`：普通 E2E 三轮均为 6768/6768 棵成功语法树、系统失败=0、耗时波动=1.00x、峰值 `HeapSys=11960320` 字节；Race E2E 三轮同样全部成功、系统失败=0、耗时波动=1.00x、峰值 `HeapSys=11829248` 字节，均满足波动<3x、`HeapSys<4 GiB` 的固定退化保护。
+- ✅ 明确 `FileID` 只在同一分析任务内唯一、`Path` 为项目内相对路径的规则；`SyntaxTree` 新增 `Path()`，单元测试 `TestSyntaxTreeKeepsFileIdentity` 先失败后通过；E2E 改为传入项目内相对路径。
 - ✅ 回归覆盖：`ParseCtx` 空指针缺陷由 `TestParseContextCanceled` 固定回归；解析行为层暂无其他已修复缺陷，`regression/` 目录预留。
 
 ### 实现与验证说明

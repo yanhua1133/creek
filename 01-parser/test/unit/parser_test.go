@@ -63,6 +63,39 @@ func TestParsePositive(t *testing.T) {
 	}
 }
 
+// fileIdentityFixtures 覆盖五种语言和 .h 双 grammar 择优路径，用于验证文件编号与路径原样传递。
+var fileIdentityFixtures = []string{
+	"fixture/c/positive/basic.c",
+	"fixture/cpp/positive/basic.cpp",
+	"fixture/java/positive/Basic.java",
+	"fixture/go/positive/basic.go",
+	"fixture/python/positive/basic.py",
+	"fixture/c/positive/header_c_style.h",
+	"fixture/cpp/positive/header_cpp_style.h",
+}
+
+// TestSyntaxTreeKeepsFileIdentity 验证语法树原样保留调用方传入的 FileID 与项目内相对路径。
+func TestSyntaxTreeKeepsFileIdentity(t *testing.T) {
+	p := parser.New()
+	for index, path := range fileIdentityFixtures {
+		t.Run(path, func(t *testing.T) {
+			file := loadFixture(t, path)
+			file.ID = parser.FileID(100 + index)
+			res, err := p.Parse(context.Background(), file, parser.ParseOptions{})
+			if err != nil {
+				t.Fatalf("解析失败: %v", err)
+			}
+			defer res.Tree.Close()
+			if res.Tree.FileID() != file.ID {
+				t.Errorf("FileID = %d，期望 %d", res.Tree.FileID(), file.ID)
+			}
+			if res.Tree.Path() != path {
+				t.Errorf("Path = %q，期望 %q", res.Tree.Path(), path)
+			}
+		})
+	}
+}
+
 // boundaryLegalFixtures 是合法的边界 fixture（空文件、仅注释、最小文件），解析后不应有系统失败。
 var boundaryLegalFixtures = []string{
 	"fixture/c/boundary/empty.c",
