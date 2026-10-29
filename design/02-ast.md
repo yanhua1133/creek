@@ -114,16 +114,22 @@ type Node interface {
     Kind() NodeKind
     // Range 返回该节点覆盖的源码范围，同时包含字节偏移和零基行列位置。
     Range() SourceRange
+    // CSTRange 返回构建该节点的原始 CST 节点范围，用于回溯。
+    CSTRange() SourceRange
+    // Text 返回名称、字面量、限定符和未归类节点保留的源码文本。
+    Text() string
     // ChildCount 返回直接子节点数量。
     ChildCount() int
     // Child 返回指定位置的直接子节点。
     Child(index int) (Node, bool)
     // ChildByRole 返回指定语义角色对应的子节点，例如条件、循环体或被调用目标。
     ChildByRole(role Role) (Node, bool)
+    // ChildRole 返回指定位置子节点的语义角色。
+    ChildRole(index int) Role
     // Extension 返回挂在该节点上的语言扩展，不存在时返回 false。
     Extension() (LanguageExtension, bool)
-    // CSTRange 返回构建该节点的原始 CST 节点范围，用于回溯。
-    CSTRange() SourceRange
+    // Attribute 返回运算符等不适合作为子节点的语法属性。
+    Attribute(name string) (string, bool)
 }
 ```
 
@@ -293,6 +299,8 @@ type LanguageExtension interface {
 type Converter interface {
     // Convert 将一个已解析的语法树转换为 common AST，并返回转换诊断。
     Convert(ctx context.Context, tree parser.SyntaxTree) (CommonAST, []Diagnostic, error)
+    // ConvertWithOptions 按选项转换语法树，并返回 AST、诊断、性能指标和可选快照。
+    ConvertWithOptions(ctx context.Context, tree parser.SyntaxTree, options ConversionOptions) (ConversionResult, error)
 }
 
 // CommonAST 表示单个源文件转换得到的统一抽象语法树。
@@ -305,8 +313,12 @@ type CommonAST interface {
     Root() Node
     // NodeByID 返回指定标识的节点，不存在时返回 false。
     NodeByID(id NodeID) (Node, bool)
+    // NodesByCSTRange 返回由指定 CST 范围生成的 AST 节点。
+    NodesByCSTRange(sourceRange SourceRange) []Node
 }
 ```
+
+`ConversionOptions` 可配置最大递归深度、性能指标采集、运行时跟踪区域和结构化 AST 快照。默认 `Convert` 关闭指标、跟踪和快照输出，保持原有结果与正常性能。`ConversionResult` 在开关启用时返回转换耗时、累计分配字节、输入字节数、AST 节点数、诊断数以及稳定 JSON 快照。快照按源码顺序输出节点，属性按名称排序，不依赖 map 遍历顺序，可直接用于独立验证和 golden 比对。
 
 接口约束：
 
@@ -348,7 +360,8 @@ type CommonAST interface {
 - 转换结果不复制完整源码内容，源码切片按需从上游获取。
 - 转换过程接受上下文取消信号，禁止不可中断的长时间转换。
 - 对超深嵌套设置可配置递归深度上限，超限时保守终止并记录诊断。
-- 内置计时与 profile 埋点，可输出结构化中间 AST 摘要用于验证功能与性能，埋点默认关闭且不影响正常转换。
+- `ConvertWithOptions` 内置转换阶段计时、累计内存分配、输入字节数、节点数和诊断数统计；可选运行时跟踪区域用于 profile，默认关闭。
+- `MarshalSnapshot` 输出稳定 JSON 中间 AST；也可由 `ConvertWithOptions` 在转换完成时按开关生成，默认关闭且不改变分析结果。
 - 性能基准与资源上限在获得真实 fixture 与基准数据后确定，不提前虚构指标。
 
 ## 安全考虑
@@ -366,7 +379,15 @@ type CommonAST interface {
 | 测试层 | 目录 | 输入来源 | 默认执行 |
 |---|---|---|---|
 | 单元测试 | `02-ast/test/unit/` | 项目自有最小 fixture 与跨语言等价 fixture | 是 |
-| E2E 测试 | `02-ast/test/e2e/` | 复用 01 的真实项目 submodule | 否，使用 `e2e` build tag |
+| E2E 测试 | `02-ast/test/e2e/` | 根目录 `e2e-corpus/` 的共享只读项目语料 | 否，使用 `e2e` build tag |
+
+### E2E expected
+
+- 大型开源项目源码全项目只保留在 `e2e-corpus/projects/` 一份，Common AST 模块不得复制 submodule。
+- 共享清单读取、commit 校验和源码过滤统一复用 `internal/e2etest/`，Common AST 模块只实现自身转换、摘要和 expected 比较。
+- `02-ast/test/e2e/fixture/expected/` 按共享项目标识保存五个独立 JSON expected。
+- 每个 expected 必须明确写出测试目的、源码文件数、转换成功数、根节点错误数、Parser 诊断文件数、AST 诊断文件数、未映射节点数、系统失败数、Common AST 规范化快照 SHA-256 和 AST 诊断 SHA-256。
+- E2E 测试必须逐字段比较实际结果与 expected；日志只用于展示耗时，不承担定义预期的职责。
 
 ### 单元测试覆盖
 
@@ -412,15 +433,33 @@ Common AST 是分析流水线的**中间步骤**，不产出漏洞报告，因�
 - 五种语言均有有效正报，核心节点映射与 golden fixture 精确一致，系统失败为零，无错误结构（零错误）。
 - `go test`、`go test -race`、静态检查与构建全部通过。
 
+### 2026-08-17 验证基线
+
+| 语言 | 项目 | 源码文件 | AST 成功 | AST 诊断文件 | 未映射节点 | 系统失败 | 耗时 |
+|---|---|---:|---:|---:|---:|---:|---:|
+| C | `redis/redis` | 278 | 278 | 33 | 0 | 0 | 5.83s |
+| C++ | `protocolbuffers/protobuf` | 1135 | 1135 | 364 | 0 | 0 | 19.27s |
+| Java | `junit-team/junit-framework` | 1738 | 1738 | 6 | 0 | 0 | 4.93s |
+| Go | `go-git/go-git` | 690 | 690 | 0 | 0 | 0 | 4.17s |
+| Python | `django/django` | 2927 | 2927 | 0 | 0 | 0 | 15.35s |
+
+- 五个共享 submodule 共验证 6768 个源码文件，全部生成 `File` 根节点。
+- 未映射语法节点为 0，系统失败为 0；AST 诊断均来自上游 CST 错误节点恢复，不包含未映射诊断。
+- 五种语言规范化 golden 快照全部精确一致；结构化 JSON 快照确定性测试通过。
+- 总耗时 49.76s，包含为 6768 棵 Common AST 生成稳定 JSON 并计算项目级 SHA-256，仅作为当前环境顺序执行基线，不作为跨机器固定性能承诺。
+
 ## 实施进度
 
 - ✅ 明确 Common AST 模块职责与 AST 保真、IR 归一的分工。
 - ✅ 确定核心节点加语言扩展的分层结构与不冲突约束。
 - ✅ 完成核心节点集合、接口、处理流程与错误处理设计。
 - ✅ 设计单元测试、跨语言等价性测试与误报口径。
-- ❌ 创建 `02-ast/` 包结构与节点类型定义。
-- ❌ 创建五种语言的单元测试 fixture 与跨语言等价 fixture。
-- ❌ 编写并确认失败测试。
-- ❌ 实现五种语言的 CST 到 common AST 转换器。
-- ❌ 运行单元测试、Race Detector 与 E2E 测试。
-- ❌ 统计五种语言的正报、误报、漏报与性能基线。
+- ✅ 创建 `02-ast/` 包结构、节点类型、索引和语言扩展定义。
+- ✅ 创建五种语言的单元测试 fixture、跨语言等价 fixture 和独立 golden 文件。
+- ✅ 编写并确认缺失转换器、可观测性接口和深度选项的失败测试。
+- ✅ 实现五种语言的 CST 到 Common AST 转换器，真实项目未映射节点为 0。
+- ✅ 实现稳定 `NodeID`、CST 反向索引、角色访问、运算符属性和 JSON 中间结果输出。
+- ✅ 实现按需计时、累计内存分配、处理量指标和 Go 运行时跟踪区域。
+- ✅ 单元测试、Race Detector、`go vet`、Parser 回归和五语言 E2E 全部通过。
+- ✅ 五语言 golden 正报 5/5，真实源码转换 6768/6768，系统失败 0，未映射节点 0。
+- ✅ E2E 改为读取根目录单份共享语料；五个项目 expected 分别锁定测试目的、逐项指标、完整 Common AST SHA-256 和诊断 SHA-256。

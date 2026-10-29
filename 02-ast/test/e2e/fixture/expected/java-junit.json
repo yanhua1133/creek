@@ -1,0 +1,17 @@
+{
+  "test_purpose": "把 JUnit 的全部 Java 源码从共享语料转换为 Common AST，锁定声明、模块、注解、错误恢复和完整 AST 结构",
+  "project_id": "java-junit",
+  "assertions": {
+    "source_files": 1738,
+    "converted_files": 1738,
+    "required_root_kind": "File",
+    "wrong_root_files": 0,
+    "parser_diagnostic_files": 6,
+    "ast_diagnostic_files": 6,
+    "unmapped_nodes": 0,
+    "system_failures": 0,
+    "total_bytes": 7704902,
+    "common_ast_sha256": "04f3aeb26e958a1755a685b005bef2d6e7301c37376387604929def08c97fdf9",
+    "diagnostics_sha256": "c48c21d8c47fb555df2cfb7b9ad47bf10d92a7905ffc32a567ca8d20037e1a01"
+  }
+}

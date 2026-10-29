@@ -1,0 +1,35 @@
+File
+  PackageDecl
+    NameRef "fixture"
+  ImportDecl
+    MemberAccess
+      MemberAccess
+        NameRef "java"
+        NameRef "util"
+      NameRef "List"
+  ClassDecl
+    NameRef "Basic"
+    FunctionDecl
+      NamedType "int"
+      NameRef "sum"
+      ParameterDecl
+        GenericType
+          NamedType "List"
+          NamedType "Integer"
+        NameRef "values"
+      Block
+        VarDeclStmt
+          NamedType "int"
+          NameRef "total"
+          Literal "0"
+        ForEachStmt
+          NamedType "int"
+          NameRef "value"
+          NameRef "values"
+          Block
+            ExprStmt
+              AssignExpr
+                NameRef "total"
+                NameRef "value"
+        ReturnStmt
+          NameRef "total"

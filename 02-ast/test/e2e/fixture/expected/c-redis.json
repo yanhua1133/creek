@@ -1,0 +1,17 @@
+{
+  "test_purpose": "把 Redis 的全部 C 与头文件从共享语料解析并转换为 Common AST，锁定根节点、错误恢复、语言扩展和完整 AST 结构",
+  "project_id": "c-redis",
+  "assertions": {
+    "source_files": 278,
+    "converted_files": 278,
+    "required_root_kind": "File",
+    "wrong_root_files": 0,
+    "parser_diagnostic_files": 53,
+    "ast_diagnostic_files": 33,
+    "unmapped_nodes": 0,
+    "system_failures": 0,
+    "total_bytes": 9226711,
+    "common_ast_sha256": "eeb679523be53d9d17355a1a7e5fc3aed70f923c06db14acbebff49fb79bf395",
+    "diagnostics_sha256": "9063be28c45f795e5b3560d5e7e8f5905c5b33d97c219174c8be7292049fdf09"
+  }
+}
