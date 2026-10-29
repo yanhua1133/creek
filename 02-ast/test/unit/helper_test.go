@@ -21,7 +21,7 @@ func fixturePath(relative string) string {
 	return filepath.Join("fixture", filepath.FromSlash(relative))
 }
 
-// loadSourceFile 从独立 fixture 文件加载待解析源码。
+// loadSourceFile 从独立 fixture 文件加载待解析源码，项目内路径取相对 fixture 目录的路径。
 func loadSourceFile(t *testing.T, relative string) parser.SourceFile {
 	t.Helper()
 	path := fixturePath(relative)
@@ -29,7 +29,7 @@ func loadSourceFile(t *testing.T, relative string) parser.SourceFile {
 	if err != nil {
 		t.Fatalf("读取 fixture 失败 %s: %v", path, err)
 	}
-	return parser.SourceFile{ID: 1, Path: filepath.Base(path), Content: content}
+	return parser.SourceFile{ID: 1, Path: relative, Content: content}
 }
 
 // buildAST 先解析 fixture，再转换为 Common AST，并在测试结束前关闭语法树。
