@@ -1,0 +1,14 @@
+{
+  "test_purpose": "全量解析 Django 的 Python 与类型桩源码，验证全部文件生成无诊断语法树，并锁定完整 CST",
+  "project_id": "python-django",
+  "assertions": {
+    "source_files": 2927,
+    "successful_trees": 2927,
+    "system_failures": 0,
+    "total_bytes": 19292341,
+    "diagnostic_files": 0,
+    "diagnostic_files_by_extension": {},
+    "syntax_tree_sha256": "49a4dccb3985f8029822dbbcedacc11ddae6c7a900d16d8d53887a05772b1691",
+    "diagnostics_sha256": "dd855c42458da8944bbdbe6d0c7b308d396a12b8b28f7bea1f469a7a8c101f1a"
+  }
+}

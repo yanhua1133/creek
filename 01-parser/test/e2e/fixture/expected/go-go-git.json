@@ -1,0 +1,14 @@
+{
+  "test_purpose": "全量解析 go-git 的 Go 源码，验证全部文件生成无诊断语法树，并锁定完整 CST",
+  "project_id": "go-go-git",
+  "assertions": {
+    "source_files": 690,
+    "successful_trees": 690,
+    "system_failures": 0,
+    "total_bytes": 4263841,
+    "diagnostic_files": 0,
+    "diagnostic_files_by_extension": {},
+    "syntax_tree_sha256": "587e911564051fc25146ab5cba5f4aab90e5231b1a51f708004bd70314988ff4",
+    "diagnostics_sha256": "265a8ed8e27c12ab4e2c0e7bf4aac49ba746e2166a557a6ffeb84c7f1a31e362"
+  }
+}

@@ -26,18 +26,19 @@ Parser 模块使用官方 Go 绑定 `github.com/tree-sitter/go-tree-sitter`，�
     │       └── python/
     └── e2e/
         ├── parser_e2e_test.go
-        ├── project_manifest_test.go
+        ├── resource_e2e_test.go
+        ├── support_test.go
         └── fixture/
-            ├── projects.lock.json
-            └── projects/
-                ├── redis/              # git submodule，C
-                ├── protobuf/           # git submodule，C++
-                ├── junit-framework/    # git submodule，Java
-                ├── go-git/             # git submodule，Go
-                └── django/              # git submodule，Python
+            └── expected/
+                ├── c-redis.json
+                ├── cpp-protobuf.json
+                ├── java-junit.json
+                ├── go-go-git.json
+                ├── python-django.json
+                └── resource-baseline.json
 ```
 
-单元测试使用项目自有的最小独立源码 fixture；E2E 测试使用固定提交的真实 GitHub 开源项目 submodule。任何外部项目在加入前必须同时满足：GitHub Star 数不低于 200，目标语言源码文件不低于 100 个。E2E 测试运行时不得访问网络，所有输入都来自已初始化的 submodule。
+单元测试使用项目自有的最小独立源码 fixture；E2E 测试读取根目录 `e2e-corpus/` 中固定提交的真实 GitHub 开源项目 submodule。任何外部项目在加入前必须同时满足：GitHub Star 数不低于 200，目标语言源码文件不低于 100 个。E2E 测试运行时不得访问网络，所有输入都来自已初始化的共享 submodule。
 
 ## 目标
 
@@ -349,7 +350,7 @@ Parser 测试分为完全独立的单元测试与 E2E 测试：
 | 测试层 | 目录 | 输入来源 | 默认执行 |
 |---|---|---|---|
 | 单元测试 | `01-parser/test/unit/` | 项目自有最小 fixture | 是 |
-| E2E 测试 | `01-parser/test/e2e/` | Git submodule 中的真实项目 | 否，使用 `e2e` build tag |
+| E2E 测试 | `01-parser/test/e2e/` | 根目录 `e2e-corpus/` 的共享只读项目 | 否，使用 `e2e` build tag |
 
 单元测试与 E2E 测试不得共享隐式全局状态。公共测试辅助代码只能放在明确的测试辅助包中，不能把测试数据嵌入 Go 字符串。
 
@@ -411,33 +412,42 @@ Parser 测试分为完全独立的单元测试与 E2E 测试：
 ### E2E 测试目录
 
 ```text
+e2e-corpus/
+├── projects.json
+└── projects/
+    ├── redis/
+    ├── protobuf/
+    ├── junit-framework/
+    ├── go-git/
+    └── django/
+
 01-parser/test/e2e/
 ├── parser_e2e_test.go
-├── project_manifest_test.go
-├── metrics_test.go
+├── resource_e2e_test.go
+├── support_test.go
 └── fixture/
-    ├── projects.lock.json
-    └── projects/
-        ├── redis/
-        ├── protobuf/
-        ├── junit-framework/
-        ├── go-git/
-        └── django/
+    └── expected/
+        ├── c-redis.json
+        ├── cpp-protobuf.json
+        ├── java-junit.json
+        ├── go-go-git.json
+        ├── python-django.json
+        └── resource-baseline.json
 ```
 
-`fixture/projects/` 下每个目录必须是 Git submodule，禁止复制源码快照代替 submodule。`.gitmodules` 必须记录标准 HTTPS 仓库地址，主仓库固定 submodule commit。
+五个大型项目由项目根目录 `e2e-corpus/` 全局共享，只保留一份 Git submodule。`internal/e2etest/` 统一负责共享清单读取、commit 校验和文件过滤。Parser 的 `fixture/expected/` 只保存 Parser 自己的预期，不得复制源码、重复实现语料访问逻辑或存放其他模块结果。
 
 ### E2E 开源项目
 
-以下 Star 数于 2026 年 7 月 27 日核验，均显著高于 200。源码文件数必须在实际添加 submodule 后由离线清单脚本精确统计并写入 `projects.lock.json`；任何项目目标语言文件数少于 100 时，测试必须立即失败并更换项目。
+以下 Star 数于 2026 年 7 月 27 日核验，均显著高于 200。源码文件数必须在实际添加 submodule 后由离线清单脚本精确统计并写入 `e2e-corpus/projects.json`；任何项目目标语言文件数少于 100 时，测试必须立即失败并更换项目。
 
-| 语言 | Submodule 路径 | GitHub 项目 | 核验 Star 数 | 计入源码扩展名 |
+| 语言 | 共享 Submodule 路径 | GitHub 项目 | 核验 Star 数 | 计入源码扩展名 |
 |---|---|---|---:|---|
-| C | `fixture/projects/redis` | `redis/redis` | 约 74,900 | `.c`、`.h` |
-| C++ | `fixture/projects/protobuf` | `protocolbuffers/protobuf` | 约 71,300 | `.cc`、`.cpp`、`.cxx`、`.h`、`.hh`、`.hpp`、`.hxx`、`.inc` |
-| Java | `fixture/projects/junit-framework` | `junit-team/junit-framework` | 约 7,000 | `.java` |
-| Go | `fixture/projects/go-git` | `go-git/go-git` | 约 7,400 | `.go` |
-| Python | `fixture/projects/django` | `django/django` | 约 88,200 | `.py`、`.pyi` |
+| C | `e2e-corpus/projects/redis` | `redis/redis` | 约 74,900 | `.c`、`.h` |
+| C++ | `e2e-corpus/projects/protobuf` | `protocolbuffers/protobuf` | 约 71,300 | `.cc`、`.cpp`、`.cxx`、`.h`、`.hh`、`.hpp`、`.hxx` |
+| Java | `e2e-corpus/projects/junit-framework` | `junit-team/junit-framework` | 约 7,000 | `.java` |
+| Go | `e2e-corpus/projects/go-git` | `go-git/go-git` | 约 7,400 | `.go` |
+| Python | `e2e-corpus/projects/django` | `django/django` | 约 88,200 | `.py`、`.pyi` |
 
 选择依据：
 
@@ -448,15 +458,16 @@ Parser 测试分为完全独立的单元测试与 E2E 测试：
 
 ### E2E 项目锁定清单
 
-`projects.lock.json` 至少记录：
+共享清单 `e2e-corpus/projects.json` 至少记录：
 
 ```json
 {
   "verified_at": "2026-07-27",
   "projects": [
     {
+      "id": "c-redis",
       "language": "c",
-      "path": "fixture/projects/redis",
+      "path": "e2e-corpus/projects/redis",
       "repository": "redis/redis",
       "commit": "固定的完整提交哈希",
       "stars_at_verification": 74900,
@@ -468,7 +479,11 @@ Parser 测试分为完全独立的单元测试与 E2E 测试：
 }
 ```
 
-表中只展示一个对象结构，实际清单必须包含五个项目。`source_file_count` 在添加 submodule 时由脚本计算并替换为真实值，禁止保留零值。Star 数只在引入或升级 submodule 时联网核验；常规测试只读取锁定清单并离线校验 commit 与源码文件数，避免 CI 依赖 GitHub API。
+表中只展示一个对象结构，实际清单必须包含五个项目。`source_file_count` 在添加 submodule 时由脚本计算并替换为真实值，禁止保留零值。Star 数只在引入或升级 submodule 时联网核验；常规测试只读取共享清单并离线校验 commit 与源码文件数，避免 CI 依赖 GitHub API。
+
+Parser 每个 expected 文件必须明确包含：测试目的、`project_id`、源码文件数、成功语法树数、系统失败数、诊断文件数、按扩展名诊断计数、规范化语法树 SHA-256 和规范化诊断 SHA-256。测试逐字段比较实际结果与 expected，禁止只输出日志。
+
+资源基线使用独立的 `resource-baseline.json` 明确记录测试目的、覆盖的五个共享项目和逐项阈值。测试连续执行三轮全量解析，每轮都必须覆盖 6768 个源码文件并全部生成可访问的语法树；三轮累计系统失败必须为零，最长轮次与最短轮次的耗时比必须小于 `3`，各轮结束时观测到的 Go 堆 `HeapSys` 峰值必须小于 `4 GiB`。资源测试关闭诊断收集并立即关闭每棵语法树，只度量 Parser 解析和资源释放路径，不重复计算结构摘要。
 
 ### E2E 文件计数规则
 
@@ -501,7 +516,7 @@ go test -race -tags=e2e ./01-parser/test/e2e/...
 Submodule 初始化命令：
 
 ```text
-git submodule update --init --recursive 01-parser/test/e2e/fixture/projects
+git submodule update --init --recursive e2e-corpus/projects
 ```
 
 ## 正确性口径
@@ -525,7 +540,7 @@ Parser 是分析流水线的**中间步骤**，不产出漏洞报告，因此没
 | django | Python | 0 | 2927 | 0% |
 | junit-framework | Java | 6 | 1738 | 0.3% |
 | redis | C | 53 | 278 | 19.1% |
-| protobuf | C++ | 403 | 1095 | 36.8% |
+| protobuf | C++ | 443 | 1135 | 39.0% |
 
 **为什么 C/C++ 偏高是合理的、且不是 parser 缺陷**，由两条证据支撑：
 
@@ -543,7 +558,7 @@ protobuf 的 `objectivec/` 目录是 Objective-C 源码（`.h` 扩展名），�
 - `.h` 文件全部执行 C 与 C++ 双 grammar 解析，并按固定错误评分规则选择结果。
 - `.hh`、`.hpp`、`.hxx`、`.ipp`、`.tpp` 文件全部使用 C++ grammar 解析。
 - C/C++ 头文件解析不得读取编译数据库、构建脚本、include path、项目配置或调用方语言提示。
-- E2E 目录包含五个固定提交的 Git submodule。
+- 根目录共享语料包含五个固定提交的 Git submodule，Parser 模块不复制源码。
 - 每个 E2E 项目在加入时 Star 数不低于 200，且目标语言源码文件不少于 100。
 - E2E 测试全量解析纳入范围的源码文件，不使用抽样替代。
 - 单元层每个 fixture 的语法树与诊断均与 golden 精确一致。
@@ -559,7 +574,7 @@ protobuf 的 `objectivec/` 目录是 Objective-C 源码（`.h` 扩展名），�
 - ✅ 单独设计 `01-parser/test/unit/` 单元测试目录。
 - ✅ 单独设计 `01-parser/test/e2e/` E2E 测试目录。
 - ✅ 选定五个 Star 数高于 200 的 GitHub 开源项目。
-- ✅ 设计 E2E submodule、锁定清单与源码文件数校验规则。
+- ✅ 设计共享 E2E submodule、语料清单、模块 expected 与源码文件数校验规则。
 - ✅ 定义 Parser 阶段的正报、误报、漏报和系统失败口径。
 - ✅ 创建 Go module 与 Parser 包结构。
 - ✅ 添加并固定 Tree-sitter runtime 与 grammar 依赖版本（go-tree-sitter v0.25.0；grammar：c v0.24.2、cpp v0.25.0、java、go v0.25.0、python v0.25.0）。
@@ -567,12 +582,13 @@ protobuf 的 `objectivec/` 目录是 Objective-C 源码（`.h` 扩展名），�
 - ✅ 实现 Parser、语言识别、语法树包装、诊断收集与 .h 双解析择优。
 - ✅ 运行单元测试与 Race Detector 通过（`go test`、`go test -race`、`go vet`、`gofmt` 均通过）。
 - ✅ 单元正确性：每个 fixture 的语法树与诊断均与 golden 精确一致，故意语法错误 fixture 全部触发对应诊断，合法 fixture 无多余诊断，系统失败=0。
-- ✅ 添加五个 E2E Git submodule 并记录真实 commit、Star 数和源码文件数（redis/protobuf/junit-framework/go-git/django）。
-- ✅ 运行 E2E 全量解析测试：5 个真实项目共 6728 个文件（已排除 protobuf 的 Objective-C 目录），系统失败=0，全部生成语法树，指标与 golden 基线逐字节一致。含 ERROR 或 MISSING 节点的文件占比：go-git 0/690=0%、django 0/2927=0%、junit 6/1738=0.3%、redis 53/278=19.1%、protobuf 403/1095=36.8%。跨语言对比（无预处理器的 Go/Python 为 0、Java 0.3%）与根因抽样（C/C++ 宏与编译器扩展）共同证明：C/C++ 偏高是 tree-sitter 不展开宏的固有代价，非 parser 缺陷。
-- ✅ 完成多轮资源基线 `TestE2EResourceBaseline`：系统失败=0、多轮耗时稳定（波动 1.06x）、峰值堆内存有界无泄漏；固定系统失败=0、波动<3x、峰值 `HeapSys<4096MB` 三条退化保护。
+- ✅ 根目录共享五个 E2E Git submodule 并记录真实 commit、Star 数和源码文件数，Parser 模块不再持有重复副本。
+- ✅ 运行 E2E 全量解析测试：5 个真实项目共 6768 个文件，系统失败=0，全部生成语法树；每个项目的计数、诊断分布、完整 CST SHA-256 和诊断 SHA-256 均与独立 expected 精确一致。含 ERROR 或 MISSING 节点的文件占比：go-git 0/690=0%、django 0/2927=0%、junit 6/1738=0.3%、redis 53/278=19.1%、protobuf 443/1135=39.0%。
+- ✅ 完成多轮资源基线 `TestE2EResourceBaseline`：普通 E2E 三轮均为 6768/6768 棵成功语法树、系统失败=0、耗时波动=1.00x、峰值 `HeapSys=11960320` 字节；Race E2E 三轮同样全部成功、系统失败=0、耗时波动=1.00x、峰值 `HeapSys=11829248` 字节，均满足波动<3x、`HeapSys<4 GiB` 的固定退化保护。
 - ✅ 回归覆盖：`ParseCtx` 空指针缺陷由 `TestParseContextCanceled` 固定回归；解析行为层暂无其他已修复缺陷，`regression/` 目录预留。
 
 ### 实现与验证说明
 
 - 因单元测试为黑盒包，测试与构建使用精确包路径：实现构建 `go build ./01-parser/`、单元测试 `go test ./01-parser/test/unit`。不使用 `./...` 通配，避免 Go 语言 fixture（含故意错误与空文件的 `.go` 源）被 Go 工具链当作待构建包。
 - go-tree-sitter v0.25.0 的 `ParseCtx` 在未设置取消标志时对空指针解引用，实现中在解析前预检查 `ctx.Err()` 并设置非空取消标志规避该问题，同时保留上下文取消语义。
+- 资源基线只把各轮垃圾回收后的 `runtime.MemStats.HeapSys` 作为 Go 堆退化指标；Tree-sitter 语法树通过每文件显式 `Close` 和 Race E2E 验证生命周期，不把 `HeapSys` 错误解释为底层 C 分配的完整统计。

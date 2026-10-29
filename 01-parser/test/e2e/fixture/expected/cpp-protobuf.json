@@ -1,0 +1,14 @@
+{
+  "test_purpose": "全量解析 Protobuf 的 C++ 与头文件，验证每个文件都生成语法树，并锁定模板、宏和编译器扩展对应的完整 CST 与诊断",
+  "project_id": "cpp-protobuf",
+  "assertions": {
+    "source_files": 1135,
+    "successful_trees": 1135,
+    "system_failures": 0,
+    "total_bytes": 20313083,
+    "diagnostic_files": 443,
+    "diagnostic_files_by_extension": {".cc": 109, ".h": 333, ".hpp": 1},
+    "syntax_tree_sha256": "298ac771f66734c3387e5e414a1eb90b590d39327bc46c62d9eeb5aff2df4fa3",
+    "diagnostics_sha256": "9c63e23538399757971e9ce115bbee8b32c7e78f63fb9274a886ff163ca48e73"
+  }
+}

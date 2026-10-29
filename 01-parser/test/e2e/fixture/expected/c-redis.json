@@ -1,0 +1,14 @@
+{
+  "test_purpose": "全量解析 Redis 的 C 与头文件，验证每个文件都生成语法树，并锁定宏相关 ERROR/MISSING 诊断和完整 CST 结构",
+  "project_id": "c-redis",
+  "assertions": {
+    "source_files": 278,
+    "successful_trees": 278,
+    "system_failures": 0,
+    "total_bytes": 9226711,
+    "diagnostic_files": 53,
+    "diagnostic_files_by_extension": {".c": 49, ".h": 4},
+    "syntax_tree_sha256": "4091198b8260c298f2b93d7b30258aa1266fe5c064af4eb267c8cb768e2592b2",
+    "diagnostics_sha256": "51d316f628c59c0c96c33b1a8b7fb4a6b31d7450cbeccd699be3b5e7922987c0"
+  }
+}

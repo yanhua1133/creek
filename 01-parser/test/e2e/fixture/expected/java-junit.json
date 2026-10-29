@@ -1,0 +1,14 @@
+{
+  "test_purpose": "全量解析 JUnit 的 Java 源码，验证每个文件都生成语法树，并锁定完整 CST 与少量上游 grammar 诊断",
+  "project_id": "java-junit",
+  "assertions": {
+    "source_files": 1738,
+    "successful_trees": 1738,
+    "system_failures": 0,
+    "total_bytes": 7704902,
+    "diagnostic_files": 6,
+    "diagnostic_files_by_extension": {".java": 6},
+    "syntax_tree_sha256": "de8a0726adcad7c991ea33f97c1cdf60edf061ecc47bb871301186013473e2e4",
+    "diagnostics_sha256": "264f8e75065ba1ed12351106e54b91b0c8aef98deeb9f651234d03c19a3bc588"
+  }
+}

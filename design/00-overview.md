@@ -58,7 +58,7 @@ Parser 负责稳定、可恢复地生成 Tree-sitter 具体语法树（CST）；
 
 Common AST 与统一 IR 是两层不同抽象，职责必须划清：common AST 尽量无损地把各语言 CST 规范化为跨语言统一命名的语法树，与源码结构一一对应；统一 IR 在 common AST 与符号表之上做面向分析的语义规范化（desugar、显式化隐式操作、规范化控制流），可有损或增补。符号表建立在 common AST 之上，统一 IR 建立在 common AST 与符号表之上，因此符号表先于统一 IR 构建。
 
-每个模块的实现、单元测试、E2E 测试、fixture 和专用脚本必须收拢在对应实现目录内。模块之间只通过公开接口连接，后置模块不得跨目录访问前置模块的私有结构或测试数据。
+每个模块的实现、单元测试、E2E 测试、模块 expected、fixture 和专用脚本必须收拢在对应实现目录内。大型开源项目输入统一放在根目录 `e2e-corpus/`，全项目只保留一份共享只读 submodule；`internal/e2etest/` 统一提供清单读取、commit 校验和文件过滤，各模块不得复制语料或重复实现访问逻辑，也不得读取其他模块的 expected。模块之间只通过公开接口连接，后置模块不得跨目录访问前置模块的私有结构或测试数据。
 
 ## 目标
 
@@ -430,7 +430,7 @@ EmitSarifReport
 - ✅ 确定 Parser、Common AST、符号表、统一 IR、Call Graph 的依赖顺序。
 - ✅ 完成总体模块边界、处理流程和验收标准设计。
 - ✅ 完成 `design/01-parser.md` 详细设计。
-- ✅ 完成 Parser 测试 fixture 与实现（单元测试与 Race 通过，五语言均有正报，误报率 0.0%；E2E submodule 与性能基线待补）。
+- ✅ 完成 Parser 测试 fixture 与实现（单元、Race、Vet 与共享语料 E2E 通过，五语言 CST 和诊断摘要均由独立 expected 锁定）。
 - ✅ 完成 `design/02-ast.md` 详细设计。
 - ❌ 完成 Common AST 测试 fixture 与实现。
 - ✅ 完成 `design/03-symbol-table.md` 详细设计。

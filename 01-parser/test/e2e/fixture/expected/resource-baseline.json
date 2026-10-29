@@ -1,0 +1,18 @@
+{
+  "test_purpose": "连续三轮全量解析五个共享项目，验证每轮全部生成可访问语法树、累计系统失败为零、耗时无数量级退化且 Go 堆占用有界",
+  "project_ids": [
+    "c-redis",
+    "cpp-protobuf",
+    "java-junit",
+    "go-go-git",
+    "python-django"
+  ],
+  "assertions": {
+    "rounds": 3,
+    "source_files_per_round": 6768,
+    "successful_trees_per_round": 6768,
+    "system_failures": 0,
+    "max_elapsed_ratio": 3.0,
+    "max_heap_sys_bytes": 4294967296
+  }
+}
