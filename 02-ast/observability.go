@@ -49,8 +49,8 @@ type ConversionResult struct {
 type snapshotDocument struct {
 	// Language 是源码语言的稳定短名称。
 	Language string `json:"language"`
-	// FileID 是源码文件的稳定标识。
-	FileID uint64 `json:"file_id"`
+	// Path 是源码文件的项目内相对路径，用于在快照中标识文件；不输出只在单次任务内唯一的 FileID。
+	Path string `json:"path"`
 	// Root 是 Common AST 根节点。
 	Root snapshotNode `json:"root"`
 }
@@ -114,7 +114,7 @@ func MarshalSnapshot(tree CommonAST) ([]byte, error) {
 	}
 	document := snapshotDocument{
 		Language: tree.Language().String(),
-		FileID:   uint64(tree.FileID()),
+		Path:     tree.Path(),
 		Root:     buildSnapshotNode(tree.Root(), RoleNone),
 	}
 	content, err := json.MarshalIndent(document, "", "  ")

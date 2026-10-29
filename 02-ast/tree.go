@@ -4,8 +4,10 @@ package commonast
 type CommonAST interface {
 	// Language 返回 AST 对应的编程语言。
 	Language() Language
-	// FileID 返回 AST 对应的文件标识。
+	// FileID 返回 AST 对应的文件编号，只在同一分析任务内唯一。
 	FileID() FileID
+	// Path 返回 AST 对应源码文件的项目内相对路径。
+	Path() string
 	// Root 返回 AST 根节点。
 	Root() Node
 	// NodeByID 返回指定标识的节点。
@@ -18,8 +20,10 @@ type CommonAST interface {
 type commonAST struct {
 	// language 是源码文件使用的编程语言。
 	language Language
-	// fileID 是源码文件的稳定标识。
+	// fileID 是源码文件在当前分析任务内的编号。
 	fileID FileID
+	// path 是源码文件的项目内相对路径。
+	path string
 	// root 是 AST 根节点。
 	root *astNode
 	// nodes 保存 NodeID 到节点的索引。
@@ -41,9 +45,14 @@ func (a *commonAST) Language() Language {
 	return a.language
 }
 
-// FileID 返回 AST 对应的文件标识。
+// FileID 返回 AST 对应的文件编号。
 func (a *commonAST) FileID() FileID {
 	return a.fileID
+}
+
+// Path 返回 AST 对应源码文件的项目内相对路径。
+func (a *commonAST) Path() string {
+	return a.path
 }
 
 // Root 返回 AST 根节点。
