@@ -432,7 +432,7 @@ EmitSarifReport
 - ✅ 完成 `design/01-parser.md` 详细设计。
 - ✅ 完成 Parser 测试 fixture 与实现（单元、Race、Vet 与共享语料 E2E 通过，五语言 CST 和诊断摘要均由独立 expected 锁定）。
 - ✅ 完成 `design/02-ast.md` 详细设计。
-- ❌ 完成 Common AST 测试 fixture 与实现。
+- ✅ 完成 Common AST 测试 fixture 与实现（五语言 golden、Race、Vet 与 6768 文件 E2E 通过，系统失败和未映射节点均为 0）。
 - ✅ 完成 `design/03-symbol-table.md` 详细设计。
 - ❌ 完成符号表测试 fixture 与实现。
 - ✅ 完成 `design/04-ir.md` 详细设计。

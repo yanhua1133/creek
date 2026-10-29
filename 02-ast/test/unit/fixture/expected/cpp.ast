@@ -1,0 +1,36 @@
+File
+  ImportDecl
+    Literal "<string>"
+  ClassDecl
+    NamedType "Greeter"
+    Unknown "public"
+    FunctionDecl
+      MemberAccess
+        NameRef "std"
+        NamedType "string"
+      NameRef "greet"
+      ParameterDecl
+        QualifierType "const"
+        MemberAccess
+          NameRef "std"
+          NamedType "string"
+        ReferenceType
+          NameRef "name"
+      Block
+        IfStmt
+          UnaryExpr
+            CallExpr
+              MemberAccess
+                NameRef "name"
+                NameRef "empty"
+          Block
+            ReturnStmt
+              BinaryExpr
+                CallExpr
+                  MemberAccess
+                    NameRef "std"
+                    NameRef "string"
+                  Literal "\"hello \""
+                NameRef "name"
+        ReturnStmt
+          Literal "\"hello\""

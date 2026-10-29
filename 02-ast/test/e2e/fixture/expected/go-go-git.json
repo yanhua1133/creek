@@ -1,0 +1,17 @@
+{
+  "test_purpose": "把 go-git 的全部 Go 源码从共享语料转换为 Common AST，锁定无诊断转换和完整 AST 结构",
+  "project_id": "go-go-git",
+  "assertions": {
+    "source_files": 690,
+    "converted_files": 690,
+    "required_root_kind": "File",
+    "wrong_root_files": 0,
+    "parser_diagnostic_files": 0,
+    "ast_diagnostic_files": 0,
+    "unmapped_nodes": 0,
+    "system_failures": 0,
+    "total_bytes": 4263841,
+    "common_ast_sha256": "16f8fc6e6388c493b433cb5d4b46adba759afc6702cf11cec030acfb7d19ecaa",
+    "diagnostics_sha256": "265a8ed8e27c12ab4e2c0e7bf4aac49ba746e2166a557a6ffeb84c7f1a31e362"
+  }
+}

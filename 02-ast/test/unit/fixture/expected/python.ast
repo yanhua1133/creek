@@ -1,0 +1,45 @@
+File
+  ImportDecl
+    MemberAccess
+      NameRef "typing"
+    MemberAccess
+      NameRef "Iterable"
+  ClassDecl
+    NameRef "Calculator"
+    Block
+      FunctionDecl
+        NameRef "sum"
+        NameRef "self"
+        ParameterDecl
+          NameRef "values"
+          NamedType
+            GenericType
+              NameRef "Iterable"
+              NamedType
+                NameRef "int"
+        NamedType
+          NameRef "int"
+        Block
+          ExprStmt
+            AssignExpr
+              NameRef "total"
+              Literal "0"
+          ForEachStmt
+            NameRef "value"
+            NameRef "values"
+            Block
+              ExprStmt
+                AssignExpr
+                  NameRef "total"
+                  NameRef "value"
+          IfStmt
+            BinaryExpr
+              NameRef "total"
+              Literal "0"
+            Block
+              ExprStmt
+                CallExpr
+                  NameRef "print"
+                  NameRef "total"
+          ReturnStmt
+            NameRef "total"

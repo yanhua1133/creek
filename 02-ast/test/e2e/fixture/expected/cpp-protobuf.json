@@ -1,0 +1,17 @@
+{
+  "test_purpose": "把 Protobuf 的全部 C++ 与头文件从共享语料转换为 Common AST，锁定模板、宏、编译器扩展、错误恢复和完整 AST 结构",
+  "project_id": "cpp-protobuf",
+  "assertions": {
+    "source_files": 1135,
+    "converted_files": 1135,
+    "required_root_kind": "File",
+    "wrong_root_files": 0,
+    "parser_diagnostic_files": 443,
+    "ast_diagnostic_files": 364,
+    "unmapped_nodes": 0,
+    "system_failures": 0,
+    "total_bytes": 20313083,
+    "common_ast_sha256": "ffa1a657e67f6dcc45c2a081fcdb8851589df0ff2b9b0f8bd3b1423529a0e1f6",
+    "diagnostics_sha256": "106374584088a17b714fed9670a422275871cff3059da1cb151c20decf6a8be7"
+  }
+}

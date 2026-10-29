@@ -1,0 +1,32 @@
+File
+  PackageDecl
+    NameRef "fixture"
+  ImportDecl
+    Literal "\"fmt\""
+  FunctionDecl
+    NameRef "sum"
+    ParameterDecl
+      NameRef "values"
+      SliceType
+        NamedType "int"
+    NamedType "int"
+    Block
+      VarDeclStmt
+        NameRef "total"
+        Literal "0"
+      ForEachStmt
+        NameRef "_"
+        NameRef "value"
+        NameRef "values"
+        Block
+          AssignExpr
+            NameRef "total"
+            NameRef "value"
+      ExprStmt
+        CallExpr
+          MemberAccess
+            NameRef "fmt"
+            NameRef "Println"
+          NameRef "total"
+      ReturnStmt
+        NameRef "total"

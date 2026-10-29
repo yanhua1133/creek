@@ -1,0 +1,62 @@
+File
+  ImportDecl
+    Literal "<stdio.h>"
+  FunctionDecl
+    NamedType "int"
+    NameRef "add"
+    ParameterDecl
+      NamedType "int"
+      NameRef "left"
+    ParameterDecl
+      NamedType "int"
+      NameRef "right"
+    Block
+      VariableDecl
+        NamedType "int"
+        NameRef "sum"
+        BinaryExpr
+          NameRef "left"
+          NameRef "right"
+      IfStmt
+        BinaryExpr
+          NameRef "sum"
+          Literal "0"
+        Block
+          ExprStmt
+            CallExpr
+              NameRef "printf"
+              Literal "\"%d\""
+              NameRef "sum"
+      ForStmt
+        VariableDecl
+          NamedType "int"
+          NameRef "index"
+          Literal "0"
+        BinaryExpr
+          NameRef "index"
+          NameRef "right"
+        UnaryExpr
+          NameRef "index"
+        Block
+          ExprStmt
+            AssignExpr
+              NameRef "sum"
+              NameRef "index"
+      WhileStmt
+        BinaryExpr
+          NameRef "sum"
+          Literal "100"
+        Block
+          ExprStmt
+            UnaryExpr
+              NameRef "sum"
+      DoWhileStmt
+        Block
+          ExprStmt
+            UnaryExpr
+              NameRef "sum"
+        BinaryExpr
+          NameRef "sum"
+          Literal "0"
+      ReturnStmt
+        NameRef "sum"
