@@ -1,5 +1,5 @@
 {
-  "test_purpose": "把 Redis 的全部 C 与头文件从共享语料解析并转换为 Common AST，锁定根节点、错误恢复、语言扩展和完整 AST 结构",
+  "test_purpose": "把 Redis 的全部 C 与头文件从共享语料解析并转换为 Common AST，锁定完整 AST 结构与诊断；该项目仍有文件含语法错误，expected 只锁定当前输出以发现变化，不代表这些语法树正确，见 design/01-parser.md“E2E 语法错误现状”",
   "project_id": "c-redis",
   "assertions": {
     "source_files": 278,

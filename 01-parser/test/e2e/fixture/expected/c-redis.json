@@ -1,5 +1,5 @@
 {
-  "test_purpose": "全量解析 Redis 的 C 与头文件，验证每个文件都生成语法树，并锁定宏相关 ERROR/MISSING 诊断和完整 CST 结构",
+  "test_purpose": "全量解析 Redis 的 C 与头文件，验证每个文件都生成语法树，并锁定完整 CST 与诊断；该项目仍有文件含语法错误，expected 只锁定当前输出以发现变化，不代表这些语法树正确，见 design/01-parser.md“E2E 语法错误现状”",
   "project_id": "c-redis",
   "assertions": {
     "source_files": 278,

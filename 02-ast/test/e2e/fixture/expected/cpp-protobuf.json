@@ -1,17 +1,17 @@
 {
-  "test_purpose": "把 Protobuf 的全部 C++ 与头文件从共享语料转换为 Common AST，锁定模板、宏、编译器扩展、错误恢复和完整 AST 结构",
+  "test_purpose": "把 Protobuf 的全部 C++ 与头文件从共享语料转换为 Common AST，锁定完整 AST 结构与诊断；该项目仍有文件含语法错误，expected 只锁定当前输出以发现变化，不代表这些语法树正确，见 design/01-parser.md“E2E 语法错误现状”",
   "project_id": "cpp-protobuf",
   "assertions": {
-    "source_files": 1135,
-    "converted_files": 1135,
+    "source_files": 1095,
+    "converted_files": 1095,
     "required_root_kind": "File",
     "wrong_root_files": 0,
-    "parser_diagnostic_files": 443,
-    "ast_diagnostic_files": 364,
+    "parser_diagnostic_files": 407,
+    "ast_diagnostic_files": 331,
     "unmapped_nodes": 0,
     "system_failures": 0,
-    "total_bytes": 20313083,
-    "common_ast_sha256": "3e1c2f4e8ee43f009c9915dbd7b6f08dc099991a13a81f31d2bf40fc156a7fdc",
-    "diagnostics_sha256": "106374584088a17b714fed9670a422275871cff3059da1cb151c20decf6a8be7"
+    "total_bytes": 19826161,
+    "common_ast_sha256": "a651bca433fe40f905bb6a517affe09bae4d249ae5940015673fb996fbb0d960",
+    "diagnostics_sha256": "ca006435f13b1ab9f370354866bcb265307e014a6ae8e3a387f006390a0626c2"
   }
 }
