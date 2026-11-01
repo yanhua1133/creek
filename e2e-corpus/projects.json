@@ -19,9 +19,9 @@
       "repository": "protocolbuffers/protobuf",
       "commit": "0e436a47e854982213b4c9a72ca7f48c29bd7b88",
       "stars_at_verification": 71300,
-      "source_file_count": 1135,
+      "source_file_count": 1095,
       "extensions": [".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx"],
-      "excluded_paths": ["third_party/"]
+      "excluded_paths": ["third_party/", "objectivec/"]
     },
     {
       "id": "java-junit",

@@ -1,14 +1,14 @@
 {
-  "test_purpose": "全量解析 Protobuf 的 C++ 与头文件，验证每个文件都生成语法树，并锁定模板、宏和编译器扩展对应的完整 CST 与诊断",
+  "test_purpose": "全量解析 Protobuf 的 C++ 与头文件，验证每个文件都生成语法树，并锁定完整 CST 与诊断；该项目仍有文件含语法错误，expected 只锁定当前输出以发现变化，不代表这些语法树正确，见 design/01-parser.md“E2E 语法错误现状”",
   "project_id": "cpp-protobuf",
   "assertions": {
-    "source_files": 1135,
-    "successful_trees": 1135,
+    "source_files": 1095,
+    "successful_trees": 1095,
     "system_failures": 0,
-    "total_bytes": 20313083,
-    "diagnostic_files": 443,
-    "diagnostic_files_by_extension": {".cc": 109, ".h": 333, ".hpp": 1},
-    "syntax_tree_sha256": "298ac771f66734c3387e5e414a1eb90b590d39327bc46c62d9eeb5aff2df4fa3",
-    "diagnostics_sha256": "9c63e23538399757971e9ce115bbee8b32c7e78f63fb9274a886ff163ca48e73"
+    "total_bytes": 19826161,
+    "diagnostic_files": 407,
+    "diagnostic_files_by_extension": {".cc": 109, ".h": 297, ".hpp": 1},
+    "syntax_tree_sha256": "b9ab7b096896ed45e361fb1533abd6101804755111dcebd0fbed32d809d44770",
+    "diagnostics_sha256": "9d7ed6b4ddef7e2a95ec9dac7338f29bebd5bc3577eba96dacda23a157a25ddc"
   }
 }

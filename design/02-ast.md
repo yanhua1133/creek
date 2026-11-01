@@ -437,20 +437,21 @@ Common AST 是分析流水线的**中间步骤**，不产出漏洞报告，因�
 - 五种语言均有有效正报，核心节点映射与 golden fixture 精确一致，系统失败为零，无错误结构（零错误）。
 - `go test`、`go test -race`、静态检查与构建全部通过。
 
-### 2026-08-17 验证基线
+### 2026-11-02 验证基线
 
 | 语言 | 项目 | 源码文件 | AST 成功 | AST 诊断文件 | 未映射节点 | 系统失败 | 耗时 |
 |---|---|---:|---:|---:|---:|---:|---:|
-| C | `redis/redis` | 278 | 278 | 33 | 0 | 0 | 5.83s |
-| C++ | `protocolbuffers/protobuf` | 1135 | 1135 | 364 | 0 | 0 | 19.27s |
-| Java | `junit-team/junit-framework` | 1738 | 1738 | 6 | 0 | 0 | 4.93s |
-| Go | `go-git/go-git` | 690 | 690 | 0 | 0 | 0 | 4.17s |
-| Python | `django/django` | 2927 | 2927 | 0 | 0 | 0 | 15.35s |
+| C | `redis/redis` | 278 | 278 | 33 | 0 | 0 | 6.06s |
+| C++ | `protocolbuffers/protobuf` | 1095 | 1095 | 331 | 0 | 0 | 19.26s |
+| Java | `junit-team/junit-framework` | 1738 | 1738 | 6 | 0 | 0 | 4.87s |
+| Go | `go-git/go-git` | 690 | 690 | 0 | 0 | 0 | 4.18s |
+| Python | `django/django` | 2927 | 2927 | 0 | 0 | 0 | 15.06s |
 
-- 五个共享 submodule 共验证 6768 个源码文件，全部生成 `File` 根节点。
-- 未映射语法节点为 0，系统失败为 0；AST 诊断均来自上游 CST 错误节点恢复，不包含未映射诊断。
+- 五个共享 submodule 共验证 6728 个源码文件，全部生成 `File` 根节点。protobuf 已排除 Objective-C 目录 `objectivec/`，其中 33 个文件原本带 AST 诊断。
+- 未映射语法节点为 0，系统失败为 0；AST 诊断均来自上游 CST 的 `ERROR`、`MISSING` 节点，不包含未映射诊断。
+- AST 诊断文件不是正确结果：Common AST 只是如实转换了上游错误恢复产生的结构。redis 33 个、protobuf 331 个、junit 6 个文件的 AST 含错误结构，未达到零错误，根因和消除计划见 `design/01-parser.md`“E2E 语法错误现状”。
 - 五种语言规范化 golden 快照全部精确一致；结构化 JSON 快照确定性测试通过。
-- 总耗时 49.76s，包含为 6768 棵 Common AST 生成稳定 JSON 并计算项目级 SHA-256，仅作为当前环境顺序执行基线，不作为跨机器固定性能承诺。
+- 总耗时 49.43s，包含为 6728 棵 Common AST 生成稳定 JSON 并计算项目级 SHA-256，仅作为当前环境顺序执行基线，不作为跨机器固定性能承诺。
 
 ## 实施进度
 
@@ -465,6 +466,7 @@ Common AST 是分析流水线的**中间步骤**，不产出漏洞报告，因�
 - ✅ 实现稳定 `NodeID`、CST 反向索引、角色访问、运算符属性和 JSON 中间结果输出。
 - ✅ 实现按需计时、累计内存分配、处理量指标和 Go 运行时跟踪区域。
 - ✅ 单元测试、Race Detector、`go vet`、Parser 回归和五语言 E2E 全部通过。
-- ✅ 五语言 golden 正报 5/5，真实源码转换 6768/6768，系统失败 0，未映射节点 0。
+- ✅ 五语言 golden 正报 5/5，真实源码转换 6728/6728，系统失败 0，未映射节点 0。
+- ❌ E2E 零错误：redis 33 个、protobuf 331 个、junit 6 个文件的 AST 含上游 CST 错误恢复产生的错误结构，依赖 Parser 消除。
 - ✅ E2E 改为读取根目录单份共享语料；五个项目 expected 分别锁定测试目的、逐项指标、完整 Common AST SHA-256 和诊断 SHA-256。
 - ✅ `CommonAST` 新增 `Path()`，快照用 `path` 代替 `file_id`；`TestCommonASTKeepsFileIdentity` 与回归测试 `TestSnapshotIndependentOfFileID` 先失败后通过；单元 golden 与五个项目快照 SHA-256 更新，其余 expected 字段不变；把快照字段临时改回 `file_id` 时旧 SHA-256 全部复现，证明 AST 结构未变。

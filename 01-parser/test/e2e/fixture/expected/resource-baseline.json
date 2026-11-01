@@ -9,8 +9,8 @@
   ],
   "assertions": {
     "rounds": 3,
-    "source_files_per_round": 6768,
-    "successful_trees_per_round": 6768,
+    "source_files_per_round": 6728,
+    "successful_trees_per_round": 6728,
     "system_failures": 0,
     "max_elapsed_ratio": 3.0,
     "max_heap_sys_bytes": 4294967296

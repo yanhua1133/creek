@@ -1,5 +1,5 @@
 {
-  "test_purpose": "全量解析 JUnit 的 Java 源码，验证每个文件都生成语法树，并锁定完整 CST 与少量上游 grammar 诊断",
+  "test_purpose": "全量解析 JUnit 的 Java 源码，验证每个文件都生成语法树，并锁定完整 CST 与诊断；该项目仍有文件含语法错误，expected 只锁定当前输出以发现变化，不代表这些语法树正确，见 design/01-parser.md“E2E 语法错误现状”",
   "project_id": "java-junit",
   "assertions": {
     "source_files": 1738,

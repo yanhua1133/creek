@@ -491,7 +491,7 @@ e2e-corpus/
 
 Parser 每个 expected 文件必须明确包含：测试目的、`project_id`、源码文件数、成功语法树数、系统失败数、诊断文件数、按扩展名诊断计数、规范化语法树 SHA-256 和规范化诊断 SHA-256。测试逐字段比较实际结果与 expected，禁止只输出日志。
 
-资源基线使用独立的 `resource-baseline.json` 明确记录测试目的、覆盖的五个共享项目和逐项阈值。测试连续执行三轮全量解析，每轮都必须覆盖 6768 个源码文件并全部生成可访问的语法树；三轮累计系统失败必须为零，最长轮次与最短轮次的耗时比必须小于 `3`，各轮结束时观测到的 Go 堆 `HeapSys` 峰值必须小于 `4 GiB`。资源测试关闭诊断收集并立即关闭每棵语法树，只度量 Parser 解析和资源释放路径，不重复计算结构摘要。
+资源基线使用独立的 `resource-baseline.json` 明确记录测试目的、覆盖的五个共享项目和逐项阈值。测试连续执行三轮全量解析，每轮都必须覆盖全部共享源码文件（当前 6728 个）并全部生成可访问的语法树；三轮累计系统失败必须为零，最长轮次与最短轮次的耗时比必须小于 `3`，各轮结束时观测到的 Go 堆 `HeapSys` 峰值必须小于 `4 GiB`。资源测试关闭诊断收集并立即关闭每棵语法树，只度量 Parser 解析和资源释放路径，不重复计算结构摘要。
 
 ### E2E 文件计数规则
 
@@ -540,22 +540,78 @@ Parser 是分析流水线的**中间步骤**，不产出漏洞报告，因此没
 - 单元层每个 fixture 的语法树与诊断都与 golden 精确一致。
 - E2E 中所有纳入文件必须生成非空根节点，系统失败数量必须为零。
 
-已知 grammar 固有限制：Tree-sitter 不做预处理，C/C++ 中出现在声明位置的宏会被 grammar 报为 ERROR，使这些合法文件也含 ERROR 节点。这是上游 grammar 的解析偏差，不是本模块缺陷。E2E 全量统计（含 ERROR 或 MISSING 节点的文件数 / 纳入文件总数，已固定为 golden 基线）：
+### E2E 语法错误现状（未达标）
 
-| 项目 | 语言 | 含 ERROR/MISSING 文件 | 纳入文件总数 | 占比 |
+E2E 中含 `ERROR` 或 `MISSING` 节点的文件不是正确结果。E2E expected 锁定当前输出，只用于发现输出变化，不代表这些语法树正确。C、C++ 和 Java 仍有含语法错误的文件，未达到零错误，Parser 的 E2E 正确性验收为 ❌。
+
+2026-11-02 统计（protobuf 已排除 `objectivec/`）：
+
+| 项目 | 语言 | 含 ERROR/MISSING 文件 | 纳入文件总数 | 诊断数 |
 |---|---|---:|---:|---:|
-| go-git | Go | 0 | 690 | 0% |
-| django | Python | 0 | 2927 | 0% |
-| junit-framework | Java | 6 | 1738 | 0.3% |
-| redis | C | 53 | 278 | 19.1% |
-| protobuf | C++ | 443 | 1135 | 39.0% |
+| go-git | Go | 0 | 690 | 0 |
+| django | Python | 0 | 2927 | 0 |
+| junit-framework | Java | 6 | 1738 | 12 |
+| redis | C | 53 | 278 | 1188 |
+| protobuf | C++ | 407 | 1095 | 25768 |
 
-**为什么 C/C++ 偏高是合理的、且不是 parser 缺陷**，由两条证据支撑：
+#### 根因统计方法
 
-1. 跨语言对比：同一个 parser，对**没有预处理器**的 Go、Python 占比为 `0`，Java 仅 `0.3%`；只有依赖宏的 C/C++ 偏高。若是 parser 自身缺陷，各语言应普遍偏高，而非只集中在 C/C++。
-2. 根因抽样：抽查含 ERROR 文件的诊断位置，绝大多数落在**宏与编译器扩展**上——C 的 `va_arg(...)`、`redisAtomic`、`__attribute__((...))`、`run_with_period(...)` 等自定义宏，C++ 的 `PROTOBUF_EXPORT`/`GOOGLE_*`/`ABSL_*` 宏；tree-sitter 不展开这些宏，在声明/类型位置遇到即产生 ERROR。这是“不做预处理”这一非目标的固有代价。Java 的 6 个文件均在测试资源/测试目录，属 tree-sitter-java 对个别较新 Java 语法覆盖不全，非 parser 缺陷。
+导出全部诊断，按诊断所在行及前两行的位置特征分类：含 `#if`、`#ifdef`、`#ifndef`、`#elif`、`#else`、`#endif` 的归为“条件编译分隔语法结构”；否则含宏形态标识符（大写加下划线、`va_arg`、`__attribute__` 等）的归为“宏或编译器扩展”；两者都不含的归为“未归因”。这只是位置特征，不等于根因已经证实。一个文件可能同时含多类诊断。
 
-protobuf 的 `objectivec/` 目录是 Objective-C 源码（`.h` 扩展名），非 C++，已在锁定清单 `excluded_paths` 中排除，不计入上表。上表数值对固定 commit 与固定 grammar 完全确定，作为“已知豁免”传给下游，下游检测器不得因这些 ERROR 而误报漏洞。
+| 项目 | 只含宏类 | 只含条件编译类 | 宏和条件编译 | 含未归因诊断 |
+|---|---:|---:|---:|---:|
+| redis | 31 | 9 | 7 | 6 |
+| protobuf | 99 | 39 | 93 | 176 |
+
+未归因诊断大多落在合法 C++ 语句上，例如 `friend class X;`、`return true;`，抽样显示通常是前面的宏使整个类体或函数体解析失败后连锁产生的，但尚未逐个证实。
+
+#### 消融实验
+
+在保持字节偏移不变的前提下改写源码后重新解析：“宏替换”把项目中定义为空或只含属性的宏替换为空格；“条件编译取首分支”删除条件编译指令并清空非首分支。实验代码不进入仓库，结果如下：
+
+| 处理方式 | protobuf 含错文件 | protobuf 诊断 | redis 含错文件 | redis 诊断 |
+|---|---:|---:|---:|---:|
+| 不处理 | 407 | 25768 | 53 | 1188 |
+| 宏替换 | 393 | 16549 | 68 | 710 |
+| 条件编译取首分支 | 377 | 18816 | 47 | 1137 |
+| 两者都做 | 357 | 10531 | 65 | 656 |
+
+结论：
+
+- 宏和条件编译是诊断的主要来源，两者都处理后 protobuf 诊断减少约 59%。
+- 全项目共用一张宏表会误伤普通标识符：redis 某处 `#define error ...` 被全局替换后，18 个原本干净的文件出现新错误。宏表必须限定在本文件及其包含的头文件内。
+- 仍有大量错误来自定义不在本仓库的外部宏，例如 GoogleTest 的 `TEST`、`MATCHER_P`，Python C API 的 `PyObject_HEAD`、`PyVarObject_HEAD_INIT`，abseil 的 `ABSL_*`，PHP 的 `ZEND_*`。
+
+#### 已证实的 grammar 缺陷
+
+以下是 grammar 不支持的合法语法，与宏无关：
+
+| 语言 | 语法 | 位置 |
+|---|---|---|
+| Java | Java 25 模块导入 `import module org.junit.start;` | junit 4 个文件 |
+| Java | 可变参数类型注解 `Class<?> @Nullable... classes` | `ClassUtils.java`、`ReflectionUtils.java`，均为主代码 |
+| C++ | 带默认参数的右值引用限定成员函数 `SerializeText(TextSerializationOptions options = {}) &&;` | `conformance/testee.h:107` |
+| C++ | 依赖类型的函数式转换 `return typename T::Proxy();` | `hpb/backend/cpp/cpp.h:24` 等 |
+
+当前接入的 tree-sitter-cpp v0.23.4 和 tree-sitter-java v0.23.5 都已是对应 Go 模块的最新版本标签。
+
+#### 已纠正的输入缺陷
+
+protobuf 的 `objectivec/` 目录是 Objective-C 源码，之前未被排除，40 个文件被当作 C/C++ 解析，其中 36 个出错，共 3011 条诊断。现已加入 `excluded_paths`。
+
+排除路径及原因：
+
+| 项目 | 排除路径 | 原因 |
+|---|---|---|
+| redis | `deps/` | 第三方依赖源码 |
+| protobuf | `third_party/` | 第三方依赖源码 |
+| protobuf | `objectivec/` | Objective-C 源码，不属于 C/C++ |
+| go-git | `vendor/` | 第三方依赖源码 |
+
+#### 消除计划
+
+1. 设计并实现保持字节偏移不变的轻量预处理：条件编译分支选择、注解宏中和（宏表限定在本文件及其包含的头文件）、常见外部宏和语句宏识别。每一步都必须用 E2E 证明诊断减少，且原本干净的文件不新增错误。
+2. 对剩余诊断逐条确认根因。grammar 缺陷列为已知豁免并单独统计，同时评估向上游提交修复或固定到包含修复的上游提交。
 
 ## 验收标准
 
@@ -585,14 +641,15 @@ protobuf 的 `objectivec/` 目录是 Objective-C 源码（`.h` 扩展名），�
 - ✅ 设计共享 E2E submodule、语料清单、模块 expected 与源码文件数校验规则。
 - ✅ 定义 Parser 阶段的正报、误报、漏报和系统失败口径。
 - ✅ 创建 Go module 与 Parser 包结构。
-- ✅ 添加并固定 Tree-sitter runtime 与 grammar 依赖版本（go-tree-sitter v0.25.0；grammar：c v0.24.2、cpp v0.25.0、java、go v0.25.0、python v0.25.0）。
+- ✅ 添加并固定 Tree-sitter runtime 与 grammar 依赖版本（go-tree-sitter v0.25.0；grammar：c v0.24.2、cpp v0.23.4、java v0.23.5、go v0.25.0、python v0.25.0）。
 - ✅ 创建五种语言单元测试 fixture（positive/negative/boundary）。
 - ✅ 实现 Parser、语言识别、语法树包装、诊断收集与 .h 双解析择优。
 - ✅ 运行单元测试与 Race Detector 通过（`go test`、`go test -race`、`go vet`、`gofmt` 均通过）。
 - ✅ 单元正确性：每个 fixture 的语法树与诊断均与 golden 精确一致，故意语法错误 fixture 全部触发对应诊断，合法 fixture 无多余诊断，系统失败=0。
 - ✅ 根目录共享五个 E2E Git submodule 并记录真实 commit、Star 数和源码文件数，Parser 模块不再持有重复副本。
-- ✅ 运行 E2E 全量解析测试：5 个真实项目共 6768 个文件，系统失败=0，全部生成语法树；每个项目的计数、诊断分布、完整 CST SHA-256 和诊断 SHA-256 均与独立 expected 精确一致。含 ERROR 或 MISSING 节点的文件占比：go-git 0/690=0%、django 0/2927=0%、junit 6/1738=0.3%、redis 53/278=19.1%、protobuf 443/1135=39.0%。
-- ✅ 完成多轮资源基线 `TestE2EResourceBaseline`：普通 E2E 三轮均为 6768/6768 棵成功语法树、系统失败=0、耗时波动=1.00x、峰值 `HeapSys=11960320` 字节；Race E2E 三轮同样全部成功、系统失败=0、耗时波动=1.00x、峰值 `HeapSys=11829248` 字节，均满足波动<3x、`HeapSys<4 GiB` 的固定退化保护。
+- ❌ E2E 零错误：系统失败为 0，全部生成语法树，输出与 expected 一致；但 junit 6 个、redis 53 个、protobuf 407 个文件仍含语法错误，见“E2E 语法错误现状”。
+- ✅ 纠正语料与文档：排除 protobuf `objectivec/`，更正 grammar 版本、junit 错误来源和“已排除 Objective-C”的错误说法。
+- ✅ 完成多轮资源基线 `TestE2EResourceBaseline`：普通 E2E 三轮均为全部共享源码文件成功生成语法树、系统失败=0、耗时波动=1.00x、峰值 `HeapSys=11960320` 字节；Race E2E 三轮同样全部成功、系统失败=0、耗时波动=1.00x、峰值 `HeapSys=11829248` 字节，均满足波动<3x、`HeapSys<4 GiB` 的固定退化保护。
 - ✅ 明确 `FileID` 只在同一分析任务内唯一、`Path` 为项目内相对路径的规则；`SyntaxTree` 新增 `Path()`，单元测试 `TestSyntaxTreeKeepsFileIdentity` 先失败后通过；E2E 改为传入项目内相对路径。
 - ✅ 回归覆盖：`ParseCtx` 空指针缺陷由 `TestParseContextCanceled` 固定回归；解析行为层暂无其他已修复缺陷，`regression/` 目录预留。
 
