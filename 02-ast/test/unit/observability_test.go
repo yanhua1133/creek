@@ -56,6 +56,36 @@ func TestMarshalSnapshotDeterminism(t *testing.T) {
 	}
 }
 
+// snapshotWithFileID 用指定文件编号解析并转换 fixture，返回结构化快照。
+func snapshotWithFileID(t *testing.T, relative string, fileID parser.FileID) []byte {
+	t.Helper()
+	file := loadSourceFile(t, relative)
+	file.ID = fileID
+	parsed, err := parser.New().Parse(context.Background(), file, parser.ParseOptions{})
+	if err != nil {
+		t.Fatalf("解析 fixture 失败 %s: %v", relative, err)
+	}
+	defer parsed.Tree.Close()
+	tree, _, err := commonast.New().Convert(context.Background(), parsed.Tree)
+	if err != nil {
+		t.Fatalf("转换 fixture 失败 %s: %v", relative, err)
+	}
+	snapshot, err := commonast.MarshalSnapshot(tree)
+	if err != nil {
+		t.Fatalf("生成快照失败 %s: %v", relative, err)
+	}
+	return snapshot
+}
+
+// TestSnapshotIndependentOfFileID 回归验证快照不随文件编号变化，只用项目内相对路径标识文件。
+func TestSnapshotIndependentOfFileID(t *testing.T) {
+	first := snapshotWithFileID(t, "go/positive/basic.go", 1)
+	second := snapshotWithFileID(t, "go/positive/basic.go", 9999)
+	if !bytes.Equal(first, second) {
+		t.Fatal("同一源码只因 FileID 不同，结构化快照就不一致")
+	}
+}
+
 // TestConversionDepthOption 验证调用方可以收紧单次转换的递归深度限制。
 func TestConversionDepthOption(t *testing.T) {
 	parsed, err := parser.New().Parse(context.Background(), loadSourceFile(t, "c/positive/basic.c"), parser.ParseOptions{})

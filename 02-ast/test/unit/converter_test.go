@@ -1,6 +1,7 @@
 package unit
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -37,6 +38,38 @@ func TestConvertPositive(t *testing.T) {
 				t.Fatalf("根节点 = %s，期望 File", tree.Root().Kind())
 			}
 			assertGolden(t, testCase.name, snapshotAST(tree))
+		})
+	}
+}
+
+// TestCommonASTKeepsFileIdentity 验证 Common AST 原样保留语法树的文件编号与项目内相对路径。
+func TestCommonASTKeepsFileIdentity(t *testing.T) {
+	fixtures := []string{
+		"c/positive/basic.c",
+		"cpp/positive/basic.cpp",
+		"java/positive/Basic.java",
+		"go/positive/basic.go",
+		"python/positive/basic.py",
+	}
+	for index, fixture := range fixtures {
+		t.Run(fixture, func(t *testing.T) {
+			file := loadSourceFile(t, fixture)
+			file.ID = parser.FileID(100 + index)
+			parsed, err := parser.New().Parse(context.Background(), file, parser.ParseOptions{})
+			if err != nil {
+				t.Fatalf("解析 fixture 失败 %s: %v", fixture, err)
+			}
+			defer parsed.Tree.Close()
+			tree, _, err := commonast.New().Convert(context.Background(), parsed.Tree)
+			if err != nil {
+				t.Fatalf("转换 fixture 失败 %s: %v", fixture, err)
+			}
+			if tree.FileID() != file.ID {
+				t.Errorf("FileID = %d，期望 %d", tree.FileID(), file.ID)
+			}
+			if tree.Path() != fixture {
+				t.Errorf("Path = %q，期望 %q", tree.Path(), fixture)
+			}
 		})
 	}
 }

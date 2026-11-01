@@ -307,8 +307,10 @@ type Converter interface {
 type CommonAST interface {
     // Language 返回该 AST 对应的编程语言。
     Language() Language
-    // FileID 返回该 AST 对应的文件标识。
+    // FileID 返回该 AST 对应的文件编号，只在同一分析任务内唯一。
     FileID() FileID
+    // Path 返回该 AST 对应源码文件的项目内相对路径。
+    Path() string
     // Root 返回该 AST 的根节点。
     Root() Node
     // NodeByID 返回指定标识的节点，不存在时返回 false。
@@ -318,7 +320,7 @@ type CommonAST interface {
 }
 ```
 
-`ConversionOptions` 可配置最大递归深度、性能指标采集、运行时跟踪区域和结构化 AST 快照。默认 `Convert` 关闭指标、跟踪和快照输出，保持原有结果与正常性能。`ConversionResult` 在开关启用时返回转换耗时、累计分配字节、输入字节数、AST 节点数、诊断数以及稳定 JSON 快照。快照按源码顺序输出节点，属性按名称排序，不依赖 map 遍历顺序，可直接用于独立验证和 golden 比对。
+`ConversionOptions` 可配置最大递归深度、性能指标采集、运行时跟踪区域和结构化 AST 快照。默认 `Convert` 关闭指标、跟踪和快照输出，保持原有结果与正常性能。`ConversionResult` 在开关启用时返回转换耗时、累计分配字节、输入字节数、AST 节点数、诊断数以及稳定 JSON 快照。快照按源码顺序输出节点，属性按名称排序，不依赖 map 遍历顺序，可直接用于独立验证和 golden 比对。快照用 `path` 字段标识源码文件，取自 `SyntaxTree.Path()`；不输出 `FileID`，因为它只在同一分析任务内唯一，会随文件编号顺序变化。
 
 接口约束：
 
@@ -388,6 +390,8 @@ type CommonAST interface {
 - `02-ast/test/e2e/fixture/expected/` 按共享项目标识保存五个独立 JSON expected。
 - 每个 expected 必须明确写出测试目的、源码文件数、转换成功数、根节点错误数、Parser 诊断文件数、AST 诊断文件数、未映射节点数、系统失败数、Common AST 规范化快照 SHA-256 和 AST 诊断 SHA-256。
 - E2E 测试必须逐字段比较实际结果与 expected；日志只用于展示耗时，不承担定义预期的职责。
+- E2E 向 Parser 传入相对共享项目目录、以 `/` 分隔的路径，快照中的 `path` 因此与机器和运行无关。
+- 2026-10-29 快照由 `file_id` 改为 `path` 后，五个项目的 Common AST 快照 SHA-256 按此变化重新锁定；源码文件数、转换成功数、诊断、未映射节点和系统失败等其余字段保持不变。
 
 ### 单元测试覆盖
 
@@ -463,3 +467,4 @@ Common AST 是分析流水线的**中间步骤**，不产出漏洞报告，因�
 - ✅ 单元测试、Race Detector、`go vet`、Parser 回归和五语言 E2E 全部通过。
 - ✅ 五语言 golden 正报 5/5，真实源码转换 6768/6768，系统失败 0，未映射节点 0。
 - ✅ E2E 改为读取根目录单份共享语料；五个项目 expected 分别锁定测试目的、逐项指标、完整 Common AST SHA-256 和诊断 SHA-256。
+- ✅ `CommonAST` 新增 `Path()`，快照用 `path` 代替 `file_id`；`TestCommonASTKeepsFileIdentity` 与回归测试 `TestSnapshotIndependentOfFileID` 先失败后通过；单元 golden 与五个项目快照 SHA-256 更新，其余 expected 字段不变；把快照字段临时改回 `file_id` 时旧 SHA-256 全部复现，证明 AST 结构未变。

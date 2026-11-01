@@ -11,7 +11,7 @@
     "unmapped_nodes": 0,
     "system_failures": 0,
     "total_bytes": 19292341,
-    "common_ast_sha256": "fd490168d5cdd8edec37491df8e8c26ce5223a62e8489425857436e42582486c",
+    "common_ast_sha256": "7431d8293e46e2fbcc55620107675e99068e3be32dcd47e2fb3edcf2f4d39e42",
     "diagnostics_sha256": "dd855c42458da8944bbdbe6d0c7b308d396a12b8b28f7bea1f469a7a8c101f1a"
   }
 }

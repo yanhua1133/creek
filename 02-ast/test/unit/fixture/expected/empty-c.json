@@ -1,6 +1,6 @@
 {
   "language": "c",
-  "file_id": 1,
+  "path": "c/boundary/empty.c",
   "root": {
     "id": 1,
     "kind": "File",

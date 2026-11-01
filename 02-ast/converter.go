@@ -140,6 +140,7 @@ func (d *dispatcher) convert(ctx context.Context, tree parser.SyntaxTree, maxDep
 	result := &commonAST{
 		language: tree.Language(),
 		fileID:   tree.FileID(),
+		path:     tree.Path(),
 		root:     nodes[0],
 		nodes:    b.nodes,
 		cstNodes: b.cstNodes,

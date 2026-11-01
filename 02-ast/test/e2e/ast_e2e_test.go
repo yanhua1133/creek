@@ -134,9 +134,10 @@ func convertProject(t *testing.T, repositoryDirectory string, files []string, re
 		if err != nil {
 			t.Fatalf("计算共享源码相对路径失败 %s: %v", path, err)
 		}
-		writeHashString(astHasher, filepath.ToSlash(relative))
-		writeHashString(diagnosticHasher, filepath.ToSlash(relative))
-		parsed, parseErr := parser.New().Parse(context.Background(), parser.SourceFile{ID: parser.FileID(index + 1), Path: path, Content: content}, parser.ParseOptions{CollectDiagnostics: true})
+		relative = filepath.ToSlash(relative)
+		writeHashString(astHasher, relative)
+		writeHashString(diagnosticHasher, relative)
+		parsed, parseErr := parser.New().Parse(context.Background(), parser.SourceFile{ID: parser.FileID(index + 1), Path: relative, Content: content}, parser.ParseOptions{CollectDiagnostics: true})
 		if parseErr != nil {
 			metrics.Assertions.SystemFailures++
 			writeHashString(astHasher, "Parser系统失败:"+parseErr.Error())
