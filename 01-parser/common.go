@@ -2,7 +2,7 @@
 // Python 源码解析为统一包装的语法树，并保留源码位置与语法诊断。
 package parser
 
-// FileID 是源码文件在当前分析任务中的稳定标识。
+// FileID 是调用方分配的源码文件编号，只要求在同一分析任务内唯一，不保证跨运行稳定。
 type FileID uint64
 
 // SourcePoint 表示源码中的一个零基行列位置。

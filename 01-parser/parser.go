@@ -135,6 +135,7 @@ func (p *treeParser) buildResult(file SourceFile, lang Language, tree *ts.Tree, 
 	st := &syntaxTree{
 		lang:    lang,
 		fileID:  file.ID,
+		path:    file.Path,
 		content: file.Content,
 		tree:    tree,
 	}

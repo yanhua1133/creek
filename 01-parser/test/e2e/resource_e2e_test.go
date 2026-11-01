@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"reflect"
 	"runtime"
 	"testing"
@@ -27,6 +28,14 @@ type resourceRoundMetrics struct {
 	Elapsed time.Duration
 	// HeapSysBytes 是本轮结束并执行垃圾回收后 Go 堆保留的字节数。
 	HeapSysBytes uint64
+}
+
+// resourceSourceFile 表示资源基线中的一个共享源码文件。
+type resourceSourceFile struct {
+	// Absolute 是用于读取源码的绝对路径。
+	Absolute string
+	// Relative 是以 / 分隔、相对共享项目目录的路径，作为 Parser 的项目内路径。
+	Relative string
 }
 
 // resourceBaselineMetrics 汇总多轮全量解析的资源退化指标。
@@ -56,7 +65,7 @@ func runParserResourceBaseline(t *testing.T, expected resourceBaselineExpected) 
 		t.Fatalf("读取共享 E2E 语料失败: %v", err)
 	}
 	projectIDs := make([]string, 0, len(manifest.Projects))
-	allFiles := make([]string, 0, expected.Assertions.SourceFilesPerRound)
+	allFiles := make([]resourceSourceFile, 0, expected.Assertions.SourceFilesPerRound)
 	for _, project := range manifest.Projects {
 		projectIDs = append(projectIDs, project.ID)
 		if err := e2etest.VerifyProject(repositoryRoot, project); err != nil {
@@ -69,7 +78,14 @@ func runParserResourceBaseline(t *testing.T, expected resourceBaselineExpected) 
 		if len(files) != project.SourceFileCount {
 			t.Fatalf("共享项目 %s 源码文件数=%d，清单值=%d", project.Repository, len(files), project.SourceFileCount)
 		}
-		allFiles = append(allFiles, files...)
+		projectDirectory := e2etest.ProjectDirectory(repositoryRoot, project)
+		for _, path := range files {
+			relative, err := filepath.Rel(projectDirectory, path)
+			if err != nil {
+				t.Fatalf("计算共享源码相对路径失败 %s: %v", path, err)
+			}
+			allFiles = append(allFiles, resourceSourceFile{Absolute: path, Relative: filepath.ToSlash(relative)})
+		}
 	}
 	if !reflect.DeepEqual(projectIDs, expected.ProjectIDs) {
 		t.Fatalf("资源基线覆盖项目与 expected 不一致: 实际=%v 期望=%v", projectIDs, expected.ProjectIDs)
@@ -100,15 +116,15 @@ func runParserResourceBaseline(t *testing.T, expected resourceBaselineExpected) 
 }
 
 // runParserResourceRound 执行一轮全量解析，并保证每棵语法树都被访问和关闭。
-func runParserResourceRound(t *testing.T, parserInstance parser.Parser, files []string) resourceRoundMetrics {
+func runParserResourceRound(t *testing.T, parserInstance parser.Parser, files []resourceSourceFile) resourceRoundMetrics {
 	t.Helper()
 	metrics := resourceRoundMetrics{SourceFiles: len(files)}
 	started := time.Now()
-	for index, path := range files {
-		if err := parseResourceFile(parserInstance, parser.FileID(index+1), path); err != nil {
+	for index, file := range files {
+		if err := parseResourceFile(parserInstance, parser.FileID(index+1), file); err != nil {
 			metrics.SystemFailures++
 			if metrics.SystemFailures <= 20 {
-				t.Logf("资源基线解析失败 %s: %v", path, err)
+				t.Logf("资源基线解析失败 %s: %v", file.Absolute, err)
 			}
 			continue
 		}
@@ -119,17 +135,17 @@ func runParserResourceRound(t *testing.T, parserInstance parser.Parser, files []
 }
 
 // parseResourceFile 解析一个共享源码文件，访问根节点后显式关闭语法树。
-func parseResourceFile(parserInstance parser.Parser, fileID parser.FileID, path string) (err error) {
+func parseResourceFile(parserInstance parser.Parser, fileID parser.FileID, file resourceSourceFile) (err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			err = fmt.Errorf("发生 panic: %v", recovered)
 		}
 	}()
-	content, err := os.ReadFile(path)
+	content, err := os.ReadFile(file.Absolute)
 	if err != nil {
 		return fmt.Errorf("读取源码失败: %w", err)
 	}
-	result, err := parserInstance.Parse(context.Background(), parser.SourceFile{ID: fileID, Path: path, Content: content}, parser.ParseOptions{CollectDiagnostics: false})
+	result, err := parserInstance.Parse(context.Background(), parser.SourceFile{ID: fileID, Path: file.Relative, Content: content}, parser.ParseOptions{CollectDiagnostics: false})
 	if err != nil {
 		return fmt.Errorf("解析源码失败: %w", err)
 	}
