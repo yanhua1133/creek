@@ -6,6 +6,8 @@
 
 符号表先于统一 IR 构建：作用域与声明收集只需 common AST 的结构信息即可完成，而统一 IR 的语义规范化（符号绑定、类型关联）需要符号表结果作为输入。
 
+每个源文件带两项身份信息：包全名和文件全名。包全名由调用方提供（Java 由源码 `package` 声明给出），是名称解析的唯一依据，符号表按包全名建子表；文件全名即 Common AST 的项目内相对路径，只用于调试和快照，不参与解析。
+
 模块坚持低误报底线：无法唯一解析的引用保留候选集合与失败原因，绝不为凑结果强行绑定到无依据符号。未解析、多候选、上游语法错误和暂不支持四种失败状态必须显式区分。
 
 ```text
@@ -76,8 +78,16 @@
 ## 核心数据结构
 
 ```go
-// SymbolID 是符号在当前分析任务中的稳定标识，可作为下游持久引用。
+// SymbolID 是符号在当前分析任务内的唯一编号，按文件全名和源码顺序分配，相同输入得到相同编号。
 type SymbolID uint64
+
+// NodeRef 定位一个 Common AST 节点；NodeID 只在单个文件内唯一，跨文件引用必须同时带文件编号。
+type NodeRef struct {
+    // File 是节点所在文件在当前分析任务内的编号。
+    File FileID
+    // Node 是节点在该文件 Common AST 内的标识。
+    Node NodeID
+}
 
 // SymbolKind 表示符号的种类，用于区分类型、函数、变量、字段、参数等。
 type SymbolKind uint8
@@ -111,19 +121,23 @@ type Symbol struct {
     Kind SymbolKind
     // Name 是该符号在源码中的名称。
     Name string
-    // DeclNode 是声明该符号的 common AST 节点标识。
-    DeclNode NodeID
+    // Package 是该符号所属包的全名，例如 Go 导入路径、Java 包名或 Python 模块全名，名称解析只使用它。
+    Package string
+    // FilePath 是声明该符号的文件的项目内相对路径，只用于调试和快照，不参与名称解析。
+    FilePath string
+    // DeclNode 是声明该符号的 common AST 节点。
+    DeclNode NodeRef
     // Scope 是该符号所属的作用域标识。
     Scope ScopeID
     // TypeRef 是与该符号关联的类型引用节点，缺省时为空。
-    TypeRef NodeID
+    TypeRef NodeRef
     // Owner 是该符号所属的类型或容器符号，自由符号时为空。
     Owner SymbolID
     // Visibility 是该符号的可见性级别。
     Visibility Visibility
 }
 
-// ScopeID 是作用域在当前分析任务中的稳定标识。
+// ScopeID 是作用域在当前分析任务内的唯一编号，按文件全名和源码顺序分配，相同输入得到相同编号。
 type ScopeID uint64
 
 // ScopeKind 表示作用域的种类。
@@ -137,8 +151,8 @@ type Scope struct {
     Kind ScopeKind
     // Parent 是父作用域标识，根作用域时为空。
     Parent ScopeID
-    // Node 是产生该作用域的 common AST 节点标识。
-    Node NodeID
+    // Node 是产生该作用域的 common AST 节点。
+    Node NodeRef
     // Symbols 是在该作用域直接声明的符号标识集合。
     Symbols []SymbolID
 }
@@ -161,8 +175,8 @@ const (
 
 // Reference 表示一次名称引用及其绑定结果。
 type Reference struct {
-    // Node 是产生该引用的 common AST 节点标识。
-    Node NodeID
+    // Node 是产生该引用的 common AST 节点。
+    Node NodeRef
     // Name 是被引用的名称。
     Name string
     // Status 是该引用的解析状态。
@@ -180,7 +194,7 @@ type SymbolIndex interface {
     // Scope 返回指定标识的作用域，不存在时返回 false。
     Scope(id ScopeID) (Scope, bool)
     // ResolveAt 返回在指定引用节点处的名称解析结果。
-    ResolveAt(node NodeID) (Reference, bool)
+    ResolveAt(node NodeRef) (Reference, bool)
     // SymbolsInScope 返回指定作用域内直接声明的符号。
     SymbolsInScope(id ScopeID) []Symbol
 }
@@ -189,16 +203,38 @@ type SymbolIndex interface {
 ## 对外接口
 
 ```go
+// Unit 表示符号表的一个输入文件。
+type Unit struct {
+    // AST 是该文件的 Common AST，文件全名取自 AST.Path()。
+    AST ast.CommonAST
+    // Package 是该文件所属包的全名，由调用方提供；Java、C 和 C++ 留空。
+    Package string
+}
+
 // Builder 定义从 common AST 构建符号表的能力。
 type Builder interface {
-    // Build 消费一组同项目源文件的 common AST，构建并返回统一符号表与诊断。
-    Build(ctx context.Context, units []ast.CommonAST) (SymbolIndex, []Diagnostic, error)
+    // Build 消费一组同项目源文件，构建并返回统一符号表与诊断。
+    Build(ctx context.Context, units []Unit) (SymbolIndex, []Diagnostic, error)
 }
 ```
 
+包全名规则：
+
+| 语言 | `Unit.Package` | 来源 |
+|---|---|---|
+| Go | 必填，导入路径，例如 `github.com/go-git/go-git/v6/plumbing/format/config` | 调用方用 `go.mod` 的 module 路径加文件所在目录计算 |
+| Python | 必填，模块全名，例如 `django.db.models.signals`；`__init__.py` 取所在包名，例如 `django.db.models` | 调用方用文件相对包根目录的路径计算 |
+| Java | 留空 | 符号表读取源码中的 `package` 声明 |
+| C/C++ | 留空 | 无包概念，命名空间来自 AST |
+
+- 包全名是建子表和解析导入的唯一依据，同一包全名的文件合并为一个包作用域；源码中的短包名（如 Go 的 `package config`）只用于校验，不用于分组。
+- 文件全名只写入 `Symbol.FilePath` 和快照，任何解析步骤都不得读取它。
+- Go 或 Python 的 `Unit.Package` 为空时，该文件的跨文件解析标记为 `ResolveUnsupported` 并给出诊断，不按短包名或文件名猜测。
+
 接口约束：
 
-- `Build` 接收整个项目的 AST 单元集合，以完成跨文件合并与解析。
+- `Build` 接收整个项目的输入文件集合，以完成跨文件合并与解析。
+- 跨文件定位节点一律使用 `NodeRef`，不得只用 `NodeID`。
 - 单个引用解析失败通过 `Reference.Status` 表达，不作为 Go `error` 返回。
 - Go `error` 仅用于系统性失败，例如无有效 AST 或内部不变量破坏。
 - 相同输入必须产生确定性的 `SymbolID`、`ScopeID` 分配与解析结果。
@@ -207,10 +243,10 @@ type Builder interface {
 
 ## 处理流程
 
-1. 遍历每个 common AST，建立作用域树并把声明登记到所属作用域。
+1. 按包全名把输入文件分组到包作用域，遍历每个 common AST，建立作用域树并把声明登记到所属作用域。
 2. 为每个声明分配稳定 `SymbolID`，记录种类、名称、所属作用域与声明节点。
-3. 跨文件合并同一逻辑命名空间的符号，例如同包、同命名空间成员。
-4. 解析导入并建立可见性视图。
+3. 跨文件合并同一逻辑命名空间的符号，例如同一包全名、同命名空间成员。
+4. 按包全名解析导入并建立可见性视图，例如 Go 的导入路径字符串直接对应包全名。
 5. 遍历名称引用，按语言规则在作用域链与可见性视图中查找候选。
 6. 对唯一候选标记为已解析；多候选标记为歧义并保留候选；无候选标记为未解析。
 7. 记录每次解析的状态与失败原因，输出 `SymbolIndex` 与诊断。
@@ -237,6 +273,7 @@ type Builder interface {
 - 构建过程接受上下文取消信号。
 - 对超深作用域嵌套和超大符号表设置可配置上限。
 - 内置计时与 profile 埋点并可输出符号表中间摘要，默认关闭。
+- 摘要与 golden 中用文件全名和 `NodeID` 标识节点，不输出 `FileID`，因为它只在同一分析任务内唯一，会随文件编号顺序变化。
 - 性能基准在获得真实 fixture 后确定。
 
 ## 安全考虑
@@ -274,6 +311,7 @@ type Builder interface {
 - ✅ 完成作用域、符号、引用与解析状态的数据结构设计。
 - ✅ 完成名称解析流程与各语言可见性规则设计。
 - ✅ 设计单元测试、语言专项测试与误报口径。
+- ✅ 明确输入文件带包全名与文件全名：解析只用包全名，文件全名只用于调试和快照；跨文件节点改用 `NodeRef`，摘要不输出 `FileID`。
 - ❌ 创建 `03-symbol-table/` 包结构。
 - ❌ 创建五种语言测试 fixture 与失败测试。
 - ❌ 实现作用域构建、符号收集与名称解析。
