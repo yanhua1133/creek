@@ -6,12 +6,12 @@
     "converted_files": 278,
     "required_root_kind": "File",
     "wrong_root_files": 0,
-    "parser_diagnostic_files": 53,
-    "ast_diagnostic_files": 33,
+    "parser_diagnostic_files": 43,
+    "ast_diagnostic_files": 25,
     "unmapped_nodes": 0,
     "system_failures": 0,
     "total_bytes": 9226711,
-    "common_ast_sha256": "9529dacf04a2bfa3328600073bdb9b41572be06ca907532493ce138928af8955",
-    "diagnostics_sha256": "9063be28c45f795e5b3560d5e7e8f5905c5b33d97c219174c8be7292049fdf09"
+    "common_ast_sha256": "02f373c4437864fc3a3e7730fc19f35fbddd15992cee17bb182b8c1b50ec6db2",
+    "diagnostics_sha256": "82cdf41d59cfe91c1f3409c739c3f5572622efe25283ab2c7ccefe51fc4c6aef"
   }
 }

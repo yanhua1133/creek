@@ -16,14 +16,26 @@ var invalidFixtures = map[string]string{
 	"python": "fixture/python/negative/broken.py",
 }
 
-// legalFixtures 是各语言合法源码 fixture，用作误报统计的合法文件总体。
+// legalFixtures 是各语言合法源码 fixture，解析后必须不产生任何诊断。
 var legalFixtures = []string{
 	"fixture/c/positive/basic.c",
 	"fixture/c/positive/header_c_style.h",
+	"fixture/c/positive/cond_cplusplus.c",
+	"fixture/c/positive/cond_define_undef.c",
+	"fixture/c/positive/cond_elif_chain.c",
+	"fixture/c/positive/cond_extern_c.h",
+	"fixture/c/positive/cond_if_zero.c",
+	"fixture/c/positive/cond_in_function.c",
+	"fixture/c/positive/cond_nested.c",
+	"fixture/c/regression/cond_continuation.c",
+	"fixture/c/boundary/cond_comment_string.c",
+	"fixture/c/boundary/cond_unterminated.c",
 	"fixture/c/boundary/empty.c",
 	"fixture/c/boundary/comment_only.c",
 	"fixture/cpp/positive/basic.cpp",
 	"fixture/cpp/positive/header_cpp_style.h",
+	"fixture/cpp/positive/cond_extern_c.cpp",
+	"fixture/cpp/regression/cond_raw_string.cpp",
 	"fixture/cpp/boundary/empty.cpp",
 	"fixture/cpp/boundary/comment_only.cpp",
 	"fixture/java/positive/Basic.java",
@@ -59,9 +71,9 @@ func TestDiagnosticSnapshot(t *testing.T) {
 	}
 }
 
-// TestFalsePositiveRate 遍历合法与错误 fixture，统计正报数、合法文件数、误报数与误报率，
-// 校验最低验收标准：五种语言均有正报、总体误报率低于 30%。此测试提供指标口径，功能正确性由快照测试保证。
-func TestFalsePositiveRate(t *testing.T) {
+// TestLegalFixturesHaveNoDiagnostics 验证每个故意错误 fixture 都产生诊断、每个合法 fixture 都不产生诊断。
+// Parser 是中间步骤，合法源码的诊断数必须为零，不使用任何比例阈值。
+func TestLegalFixturesHaveNoDiagnostics(t *testing.T) {
 	p := parser.New()
 
 	truePositives := 0
@@ -79,7 +91,7 @@ func TestFalsePositiveRate(t *testing.T) {
 		res.Tree.Close()
 	}
 
-	falsePositives := 0
+	unexpected := 0
 	for _, path := range legalFixtures {
 		file := loadFixture(t, path)
 		res, err := p.Parse(context.Background(), file, parser.ParseOptions{CollectDiagnostics: true})
@@ -87,26 +99,16 @@ func TestFalsePositiveRate(t *testing.T) {
 			t.Fatalf("解析合法 fixture 失败 %s: %v", path, err)
 		}
 		if len(res.Diagnostics) > 0 {
-			falsePositives++
-			t.Logf("合法文件产生非预期诊断: %s (%d 条)", path, len(res.Diagnostics))
+			unexpected++
+			t.Errorf("合法文件产生诊断: %s (%d 条)", path, len(res.Diagnostics))
 		}
 		res.Tree.Close()
 	}
-
-	total := len(legalFixtures)
-	rate := float64(falsePositives) / float64(total)
-	t.Logf("指标 | 正报数=%d 合法文件数=%d 误报数=%d 误报率=%.1f%%",
-		truePositives, total, falsePositives, rate*100)
+	t.Logf("指标 | 正报数=%d 合法文件数=%d 合法文件诊断数=%d", truePositives, len(legalFixtures), unexpected)
 
 	for _, lang := range []string{"c", "cpp", "java", "go", "python"} {
 		if perLang[lang] == 0 {
 			t.Errorf("语言 %s 缺少有效正报", lang)
 		}
-	}
-	if truePositives == 0 {
-		t.Error("必须存在有效正报")
-	}
-	if rate >= 0.30 {
-		t.Errorf("误报率 %.1f%% 不得达到或超过 30%%", rate*100)
 	}
 }

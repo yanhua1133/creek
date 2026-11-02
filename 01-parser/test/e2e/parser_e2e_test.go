@@ -73,6 +73,7 @@ func parseAll(t *testing.T, parserInstance parser.Parser, repositoryDirectory st
 	t.Helper()
 	treeHasher := sha256.New()
 	diagnosticHasher := sha256.New()
+	preprocessHasher := sha256.New()
 	metrics := projectMetrics{Assertions: parserAssertions{
 		SourceFiles:                len(files),
 		DiagnosticFilesByExtension: map[string]int{},
@@ -91,7 +92,28 @@ func parseAll(t *testing.T, parserInstance parser.Parser, repositoryDirectory st
 		relative = filepath.ToSlash(relative)
 		writeHashString(treeHasher, relative)
 		writeHashString(diagnosticHasher, relative)
-		success, diagnostics, elapsed := parseAndHashOne(parserInstance, parser.FileID(index+1), relative, content, treeHasher, diagnosticHasher)
+		writeHashString(preprocessHasher, relative)
+		success, diagnostics, report, elapsed := parseAndHashOne(parserInstance, parser.FileID(index+1), relative, content, treeHasher, diagnosticHasher)
+		hashPreprocessReport(preprocessHasher, report)
+		addPreprocessMetrics(&metrics.Assertions, report)
+		rawDiagnostics, rawErr := parseRawDiagnostics(parserInstance, parser.FileID(index+1), relative, content)
+		if rawErr != nil {
+			t.Fatalf("按原样解析失败 %s: %v", relative, rawErr)
+		}
+		if rawDiagnostics != 0 {
+			metrics.Assertions.RawDiagnosticFiles++
+		}
+		if success && rawDiagnostics != 0 && diagnostics == 0 {
+			metrics.Assertions.FixedByPreprocessFiles++
+		}
+		if success && rawDiagnostics == 0 && diagnostics != 0 {
+			metrics.Assertions.NewDiagnosticFiles++
+			t.Logf("分支选择后新增诊断: %s", relative)
+		}
+		if success && rawDiagnostics != 0 && diagnostics > rawDiagnostics {
+			metrics.Assertions.IncreasedDiagnosticFiles++
+			t.Logf("分支选择后诊断增多: %s 原样=%d 处理后=%d", relative, rawDiagnostics, diagnostics)
+		}
 		if elapsed > metrics.MaxFileElapsed {
 			metrics.MaxFileElapsed = elapsed
 		}
@@ -108,11 +130,53 @@ func parseAll(t *testing.T, parserInstance parser.Parser, repositoryDirectory st
 	metrics.Elapsed = time.Since(started)
 	metrics.Assertions.SyntaxTreeSHA256 = hex.EncodeToString(treeHasher.Sum(nil))
 	metrics.Assertions.DiagnosticsSHA256 = hex.EncodeToString(diagnosticHasher.Sum(nil))
+	metrics.Assertions.PreprocessSHA256 = hex.EncodeToString(preprocessHasher.Sum(nil))
 	return metrics
 }
 
+// addPreprocessMetrics 把单个文件的条件编译报告计入项目统计。
+func addPreprocessMetrics(assertions *parserAssertions, report *parser.PreprocessReport) {
+	if report == nil {
+		return
+	}
+	assertions.PreprocessBlankedBytes += int64(report.BlankedBytes)
+	assertions.PreprocessUnterminated += report.Unterminated
+	for _, branch := range report.Branches {
+		assertions.PreprocessBranches++
+		if branch.Taken {
+			assertions.PreprocessTakenBranches++
+		}
+		if branch.Value == parser.ConditionUnknown {
+			assertions.PreprocessUnknownBranches++
+		}
+	}
+}
+
+// hashPreprocessReport 按固定字段顺序写入单个文件的条件编译报告。
+func hashPreprocessReport(hasher hash.Hash, report *parser.PreprocessReport) {
+	if report == nil {
+		writeHashString(hasher, "nil")
+		return
+	}
+	writeHashString(hasher, fmt.Sprintf("blanked:%d|unterminated:%d|branches:%d", report.BlankedBytes, report.Unterminated, len(report.Branches)))
+	for _, branch := range report.Branches {
+		writeHashString(hasher, fmt.Sprintf("%d|%d|%s|%d|%t", branch.Directive.StartByte, branch.Directive.EndByte, branch.Keyword, branch.Value, branch.Taken))
+		writeHashString(hasher, branch.Condition)
+	}
+}
+
+// parseRawDiagnostics 按原样解析单个文件并返回诊断数，用于对照条件编译分支选择的效果。
+func parseRawDiagnostics(parserInstance parser.Parser, fileID parser.FileID, path string, content []byte) (int, error) {
+	result, err := parserInstance.Parse(context.Background(), parser.SourceFile{ID: fileID, Path: path, Content: content}, parser.ParseOptions{CollectDiagnostics: true, RawSource: true})
+	if err != nil {
+		return 0, err
+	}
+	defer result.Tree.Close()
+	return len(result.Diagnostics), nil
+}
+
 // parseAndHashOne 解析单个文件并把规范化语法树和诊断写入项目摘要，path 为项目内相对路径。
-func parseAndHashOne(parserInstance parser.Parser, fileID parser.FileID, path string, content []byte, treeHasher hash.Hash, diagnosticHasher hash.Hash) (success bool, diagnosticCount int, elapsed time.Duration) {
+func parseAndHashOne(parserInstance parser.Parser, fileID parser.FileID, path string, content []byte, treeHasher hash.Hash, diagnosticHasher hash.Hash) (success bool, diagnosticCount int, report *parser.PreprocessReport, elapsed time.Duration) {
 	defer func() {
 		if recover() != nil {
 			success = false
@@ -123,15 +187,15 @@ func parseAndHashOne(parserInstance parser.Parser, fileID parser.FileID, path st
 	elapsed = time.Since(started)
 	if err != nil {
 		writeHashString(treeHasher, "系统失败:"+err.Error())
-		return false, 0, elapsed
+		return false, 0, nil, elapsed
 	}
 	defer result.Tree.Close()
 	if err := hashSyntaxNode(treeHasher, result.Tree.Root()); err != nil {
 		writeHashString(treeHasher, "语法树访问失败:"+err.Error())
-		return false, 0, elapsed
+		return false, 0, result.Preprocess, elapsed
 	}
 	hashParserDiagnostics(diagnosticHasher, result.Diagnostics)
-	return true, len(result.Diagnostics), elapsed
+	return true, len(result.Diagnostics), result.Preprocess, elapsed
 }
 
 // hashSyntaxNode 按固定字段顺序递归写入完整 CST 节点结构。

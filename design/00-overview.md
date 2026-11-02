@@ -430,9 +430,9 @@ EmitSarifReport
 - ✅ 确定 Parser、Common AST、符号表、统一 IR、Call Graph 的依赖顺序。
 - ✅ 完成总体模块边界、处理流程和验收标准设计。
 - ✅ 完成 `design/01-parser.md` 详细设计。
-- ❌ 完成 Parser 测试 fixture 与实现：单元、Race、Vet 与共享语料 E2E 通过，但 junit 6 个、redis 53 个、protobuf 407 个文件仍含语法错误，未达到零错误，见 `design/01-parser.md`“E2E 语法错误现状”。
+- ❌ 完成 Parser 测试 fixture 与实现：单元、Race、Vet 与共享语料 E2E 通过，但 junit 6 个、redis 43 个、protobuf 374 个文件仍含语法错误，未达到零错误，见 `design/01-parser.md`“E2E 语法错误现状”。
 - ✅ 完成 `design/02-ast.md` 详细设计。
-- ❌ 完成 Common AST 测试 fixture 与实现：五语言 golden、Race、Vet 与 6728 文件 E2E 通过，系统失败和未映射节点均为 0；但上游 CST 错误使 370 个文件的 AST 含错误结构。
+- ❌ 完成 Common AST 测试 fixture 与实现：五语言 golden、Race、Vet 与 6728 文件 E2E 通过，系统失败和未映射节点均为 0；但上游 CST 错误使 360 个文件的 AST 含错误结构。
 - ✅ 完成 `design/03-symbol-table.md` 详细设计。
 - ❌ 完成符号表测试 fixture 与实现。
 - ✅ 完成 `design/04-ir.md` 详细设计。

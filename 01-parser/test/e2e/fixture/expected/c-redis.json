@@ -6,9 +6,19 @@
     "successful_trees": 278,
     "system_failures": 0,
     "total_bytes": 9226711,
-    "diagnostic_files": 53,
-    "diagnostic_files_by_extension": {".c": 49, ".h": 4},
-    "syntax_tree_sha256": "4091198b8260c298f2b93d7b30258aa1266fe5c064af4eb267c8cb768e2592b2",
-    "diagnostics_sha256": "51d316f628c59c0c96c33b1a8b7fb4a6b31d7450cbeccd699be3b5e7922987c0"
+    "diagnostic_files": 43,
+    "diagnostic_files_by_extension": {".c": 40, ".h": 3},
+    "syntax_tree_sha256": "e09e94445ccf30474788cdd6c4bbb14a85217a28b74c3a27b594b34480500f3c",
+    "diagnostics_sha256": "3fa571b415b9ee89e664e5731ed8713eb7a151db4cb29c5082d30d17e2a1a8d0",
+    "preprocess_branches": 1013,
+    "preprocess_taken_branches": 683,
+    "preprocess_unknown_branches": 752,
+    "preprocess_blanked_bytes": 101132,
+    "preprocess_unterminated": 0,
+    "preprocess_sha256": "1ee9e96783f2b2fabcee846a7093bc8421251a0b55c78efc8b5be0e22f9bef93",
+    "raw_diagnostic_files": 53,
+    "fixed_by_preprocess_files": 10,
+    "new_diagnostic_files": 0,
+    "increased_diagnostic_files": 0
   }
 }

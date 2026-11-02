@@ -38,6 +38,26 @@ type parserAssertions struct {
 	SyntaxTreeSHA256 string `json:"syntax_tree_sha256"`
 	// DiagnosticsSHA256 是全部规范化诊断的稳定摘要。
 	DiagnosticsSHA256 string `json:"diagnostics_sha256"`
+	// PreprocessBranches 是全部 C/C++ 文件条件编译分支总数。
+	PreprocessBranches int `json:"preprocess_branches"`
+	// PreprocessTakenBranches 是保留在解析视图中的条件分支数。
+	PreprocessTakenBranches int `json:"preprocess_taken_branches"`
+	// PreprocessUnknownBranches 是条件求值结果为未知的分支数。
+	PreprocessUnknownBranches int `json:"preprocess_unknown_branches"`
+	// PreprocessBlankedBytes 是替换为空格、不参与解析的字节总数。
+	PreprocessBlankedBytes int64 `json:"preprocess_blanked_bytes"`
+	// PreprocessUnterminated 是缺少 #endif 的条件块总数。
+	PreprocessUnterminated int `json:"preprocess_unterminated"`
+	// PreprocessSHA256 是全部条件编译报告的稳定摘要。
+	PreprocessSHA256 string `json:"preprocess_sha256"`
+	// RawDiagnosticFiles 是按原样解析（RawSource）时含诊断的文件数，用于对照。
+	RawDiagnosticFiles int `json:"raw_diagnostic_files"`
+	// FixedByPreprocessFiles 是按原样解析含诊断、分支选择后不含诊断的文件数。
+	FixedByPreprocessFiles int `json:"fixed_by_preprocess_files"`
+	// NewDiagnosticFiles 是按原样解析不含诊断、分支选择后反而含诊断的文件数，必须为零。
+	NewDiagnosticFiles int `json:"new_diagnostic_files"`
+	// IncreasedDiagnosticFiles 是按原样解析已含诊断、分支选择后诊断条数更多的文件数。
+	IncreasedDiagnosticFiles int `json:"increased_diagnostic_files"`
 }
 
 // resourceBaselineExpected 描述 Parser 多轮资源测试的目的、语料范围和硬性断言。

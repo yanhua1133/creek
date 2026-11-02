@@ -16,6 +16,8 @@ type SourceFile struct {
 type ParseOptions struct {
 	// CollectDiagnostics 指定是否遍历语法树收集语法错误和缺失节点诊断。
 	CollectDiagnostics bool
+	// RawSource 为真时直接解析原始源码，不做 C/C++ 条件编译分支选择，用于对照和排查。
+	RawSource bool
 }
 
 // DiagnosticKind 表示解析诊断问题的类型。
@@ -64,6 +66,8 @@ type ParseResult struct {
 	Diagnostics []Diagnostic
 	// Header 在解析 .h 头文件时记录双解析择优过程，其他情况为空。
 	Header *HeaderResolution
+	// Preprocess 记录最终选中语言对应的条件编译分支选择结果，非 C/C++ 文件或 RawSource 为真时为空。
+	Preprocess *PreprocessReport
 }
 
 // Parser 定义单个源码文件的解析能力。

@@ -2,7 +2,7 @@
 
 ## 结论
 
-Parser 模块使用官方 Go 绑定 `github.com/tree-sitter/go-tree-sitter`，分别接入 Tree-sitter 官方维护的 C、C++、Java、Go 和 Python grammar。模块只负责源码识别、语法解析、错误恢复、语法树访问和源码位置映射，不承担预处理展开、类型推导、名称解析、common AST 或 IR 构建。
+Parser 模块使用官方 Go 绑定 `github.com/tree-sitter/go-tree-sitter`，分别接入 Tree-sitter 官方维护的 C、C++、Java、Go 和 Python grammar。模块只负责源码识别、C/C++ 条件编译分支选择、语法解析、错误恢复、语法树访问和源码位置映射，不承担宏展开、类型推导、名称解析、common AST 或 IR 构建。
 
 测试严格拆分为两个独立目录：
 
@@ -12,12 +12,14 @@ Parser 模块使用官方 Go 绑定 `github.com/tree-sitter/go-tree-sitter`，�
 ├── language.go
 ├── diagnostic.go
 ├── tree.go
+├── preprocess.go
 ├── node.go
 └── test/
     ├── unit/
     │   ├── parser_test.go
     │   ├── language_test.go
     │   ├── diagnostic_test.go
+    │   ├── preprocess_test.go
     │   └── fixture/
     │       ├── c/
     │       ├── cpp/
@@ -54,7 +56,7 @@ Parser 模块使用官方 Go 绑定 `github.com/tree-sitter/go-tree-sitter`，�
 
 ## 非目标
 
-- 不展开 C/C++ 宏，不执行 C 预处理器。
+- 不展开 C/C++ 宏，不处理 `#include`，不执行完整的 C 预处理器；只做保持字节偏移不变的条件编译分支选择。
 - 不解析编译数据库、构建脚本或依赖下载流程；项目加载能力另行设计。
 - 不执行类型检查、名称解析、符号绑定或调用目标解析。
 - 不把 Tree-sitter concrete syntax tree 直接定义为 common AST。
@@ -84,7 +86,7 @@ Parser 模块使用官方 Go 绑定 `github.com/tree-sitter/go-tree-sitter`，�
 
 ### Parser 不负责
 
-- C/C++ 宏求值、条件编译分支选择和头文件展开。
+- C/C++ 宏展开、头文件展开，以及依赖外部配置的条件求值。
 - Java classpath、Go module、Python import path 或 C/C++ include path 解析。
 - 语义级声明、引用、类型或作用域计算。
 - 过滤业务上“不重要”的语法节点。
@@ -164,6 +166,8 @@ type SourceFile struct {
 type ParseOptions struct {
     // CollectDiagnostics 指定是否收集语法错误和缺失节点诊断。
     CollectDiagnostics bool
+    // RawSource 为真时直接解析原始源码，不做 C/C++ 条件编译分支选择。
+    RawSource bool
 }
 
 // ParseResult 保存语法树和解析过程中产生的诊断。
@@ -174,6 +178,10 @@ type ParseResult struct {
     Tree SyntaxTree
     // Diagnostics 保存按源码位置排序的解析诊断。
     Diagnostics []Diagnostic
+    // Header 在解析 .h 头文件时记录双解析择优过程，其他情况为空。
+    Header *HeaderResolution
+    // Preprocess 记录最终选中语言对应的条件编译分支选择结果，非 C/C++ 文件或 RawSource 为真时为空。
+    Preprocess *PreprocessReport
 }
 
 // Diagnostic 表示一个可以定位到源码范围的解析问题。
@@ -214,6 +222,9 @@ type Parser interface {
     // Parse 解析指定源码文件并返回语法树和诊断。
     Parse(ctx context.Context, file SourceFile, options ParseOptions) (ParseResult, error)
 }
+
+// BuildConditionalView 为 C/C++ 源码生成条件编译分支选择后的解析视图和报告，视图与原文件等长。
+func BuildConditionalView(content []byte, lang Language) ([]byte, PreprocessReport)
 
 // SyntaxTree 表示一次解析生成且需要显式关闭的语法树。
 type SyntaxTree interface {
@@ -293,9 +304,9 @@ Parser 模块使用同一个实现和同一套接口处理 C 与 C++；底层 Tr
 ## 处理流程
 
 1. 校验上下文、文件 ID、路径和源码大小。
-2. 根据扩展名确定单 grammar 解析或 `.h` 双 grammar 解析。
+2. 根据扩展名确定单 grammar 解析或 `.h` 双 grammar 解析。C/C++ 按本次使用的 grammar 生成条件编译分支选择后的解析视图，见“条件编译分支选择”。
 3. 创建或从受控池中取得对应 grammar 的 Parser 实例。
-4. 设置 grammar 并解析 UTF-8 字节。
+4. 设置 grammar 并解析 UTF-8 字节；C/C++ 解析的是解析视图，语法树节点的 `Text` 仍返回原始源码。
 5. `.h` 文件比较 C 与 C++ 两次解析结果并选择错误更少的语法树。
 6. 关闭未被选择的语法树，包装选中语法树并转移底层 tree 所有权。
 7. 遍历选中语法树并收集 `ERROR` 与 `MISSING` 诊断。
@@ -304,6 +315,81 @@ Parser 模块使用同一个实现和同一套接口处理 C 与 C++；底层 Tr
 10. 调用方完成消费后显式关闭语法树。
 
 并发解析时，每个工作任务独占一个 Parser 实例。不得让多个 goroutine 同时操作同一个底层 Parser、TreeCursor 或 QueryCursor。
+
+## 条件编译分支选择
+
+### 结论
+
+C/C++ 在交给 Tree-sitter 之前，先选择条件编译分支：每组 `#if`、`#ifdef`、`#ifndef`、`#elif`、`#else` 只保留一个分支，其余分支和全部条件编译指令行替换为空格。Tree-sitter 要求每个条件分支内部的语法结构完整，而 `#ifdef __cplusplus` 后单独出现 `extern "C" {` 这类写法会把一个语法结构拆到不同分支里，是 C/C++ 语法错误的主要来源之一。
+
+### 规则
+
+- 只把字节替换为空格，换行符 `\n` 和回车符 `\r` 保留，不插入、不删除任何字节。处理前后文件长度、全部字节偏移和行列位置完全一致，诊断和节点范围直接对应原始源码。
+- 用词法扫描识别指令：只有行首（前面只有空白）的 `#` 开始一条指令，注释、字符串、字符字面量和 C++ 原始字符串（`R"分隔符(...)分隔符"`）中的 `#` 不算；反斜杠续行属于同一条指令。
+- 条件求值结果分为真、假、未知三种，只使用以下确定信息：
+  - `__cplusplus`：用 C++ grammar 解析时视为已定义、值为 `201703`，用 C grammar 解析时视为未定义。`.h` 文件的两次解析分别求值。
+  - 整数字面量，例如 `#if 0`、`#if 1`。
+  - 本文件内、在已保留代码中先出现的 `#define` 和 `#undef`：`#define X` 后 `defined(X)` 为真，值为整数字面量时可参与比较；`#undef X` 后 `defined(X)` 为假。
+  - 运算符 `defined`、`!`、`&&`、`||`、`==`、`!=`、`<`、`>`、`<=`、`>=` 和括号；其他运算符、未知标识符和无法解析的表达式求值为未知。`&&`、`||` 按短路语义处理未知，例如“假 && 未知”为假。
+- 每组条件编译只保留第一个结果为真或未知的分支；所有分支都为假时保留 `#else` 分支，没有 `#else` 时整组都不保留。被丢弃分支中的指令和宏定义不影响后续求值。
+- 缺少 `#endif` 的条件块一直延续到文件末尾，并计入报告；没有对应 `#if` 的 `#elif`、`#else`、`#endif` 保留原样，不记入报告。tree-sitter-c 把多余的 `#endif` 解析为普通预处理指令节点 `preproc_call`，不产生诊断，这类缺陷 Parser 不会报告。
+- `#define`、`#undef`、`#include`、`#pragma`、`#error` 等非条件指令保留在解析视图中。
+- `RawSource` 选项为真时不做分支选择，直接解析原始源码，用于对照和排查。
+
+### 代价
+
+只分析一种条件组合：未保留的分支（例如其他平台的实现）不进入语法树，下游无法分析其中的代码。被丢弃的分支全部记录在报告中，下游可以据此判断哪些代码未参与分析。
+
+### 数据结构
+
+```go
+// ConditionValue 表示条件编译条件的求值结果。
+type ConditionValue uint8
+
+const (
+    // ConditionUnknown 表示条件依赖外部配置或无法解析，无法确定真假。
+    ConditionUnknown ConditionValue = iota + 1
+    // ConditionTrue 表示条件确定为真。
+    ConditionTrue
+    // ConditionFalse 表示条件确定为假。
+    ConditionFalse
+)
+
+// ConditionalBranch 记录条件编译中一个分支的判断与选择结果。
+type ConditionalBranch struct {
+    // Directive 是分支指令所在的源码范围，包含续行。
+    Directive SourceRange
+    // Keyword 是指令名称：if、ifdef、ifndef、elif 或 else。
+    Keyword string
+    // Condition 是合并续行后的条件文本，else 分支为空。
+    Condition string
+    // Value 是条件求值结果，else 分支为真。
+    Value ConditionValue
+    // Taken 表示该分支是否保留在解析视图中。
+    Taken bool
+}
+
+// PreprocessReport 记录一次 C/C++ 解析前的条件编译分支选择结果。
+type PreprocessReport struct {
+    // Branches 是按源码顺序排列的全部条件分支。
+    Branches []ConditionalBranch
+    // BlankedBytes 是替换为空格、不参与解析的字节数。
+    BlankedBytes int
+    // Unterminated 是缺少 #endif 的条件块数量。
+    Unterminated int
+}
+```
+
+`ParseOptions.RawSource` 控制是否跳过分支选择。`ParseResult.Preprocess` 保存最终选中语言对应的报告，非 C/C++ 文件或 `RawSource` 为真时为空。
+
+### 测试
+
+- 单元 fixture 覆盖：`extern "C"` 被拆到两个分支、`#if 0`、`#elif` 链、嵌套条件、按 grammar 区分的 `__cplusplus`、本文件 `#define`/`#undef` 影响求值、续行指令、注释和字符串及原始字符串中的 `#`、缺少 `#endif`、多余的 `#endif`、函数体内被丢弃的分支（验证节点文本取自原始源码）。
+- 每个 C/C++ fixture 除语法树 golden 外，还有一份报告 golden（`.pp`），逐分支记录指令、条件、求值结果和是否保留。
+- 回归 fixture：redis 中以反斜杠续行的多行条件、protobuf 中原始字符串内以 `#` 开头的行。
+- 单元测试校验解析视图与原文件等长，且被替换的位置在原文件中不是换行符。
+- E2E expected 增加报告摘要：分支数、保留分支数、未知条件分支数、替换字节数、缺少 `#endif` 的块数和报告 SHA-256。
+- E2E 对每个文件再按原样解析一次作对照，expected 锁定按原样解析时的含错文件数、因分支选择变为无诊断的文件数、原本无诊断却新增诊断的文件数（必须为 0）和诊断条数增多的文件数。
 
 ## 错误处理
 
@@ -544,15 +630,19 @@ Parser 是分析流水线的**中间步骤**，不产出漏洞报告，因此没
 
 E2E 中含 `ERROR` 或 `MISSING` 节点的文件不是正确结果。E2E expected 锁定当前输出，只用于发现输出变化，不代表这些语法树正确。C、C++ 和 Java 仍有含语法错误的文件，未达到零错误，Parser 的 E2E 正确性验收为 ❌。
 
-2026-11-02 统计（protobuf 已排除 `objectivec/`）：
+当前统计（protobuf 已排除 `objectivec/`，已启用条件编译分支选择）：
 
-| 项目 | 语言 | 含 ERROR/MISSING 文件 | 纳入文件总数 | 诊断数 |
+| 项目 | 语言 | 含 ERROR/MISSING 文件 | 按原样解析时含错文件 | 纳入文件总数 |
 |---|---|---:|---:|---:|
-| go-git | Go | 0 | 690 | 0 |
-| django | Python | 0 | 2927 | 0 |
-| junit-framework | Java | 6 | 1738 | 12 |
-| redis | C | 53 | 278 | 1188 |
-| protobuf | C++ | 407 | 1095 | 25768 |
+| go-git | Go | 0 | 0 | 690 |
+| django | Python | 0 | 0 | 2927 |
+| junit-framework | Java | 6 | 6 | 1738 |
+| redis | C | 43 | 53 | 278 |
+| protobuf | C++ | 374 | 407 | 1095 |
+
+条件编译分支选择使 redis 10 个、protobuf 33 个文件变为无诊断，没有任何原本无诊断的文件新增诊断。protobuf 有 3 个原本就含诊断的文件诊断条数略增：`map_entry.h` 7→8、`message.h` 77→78、`repeated_field_proxy.h` 62→65。新增诊断全部位于按原样解析时第一处错误之后，即已被注解宏（如 `PROTOBUF_FUTURE_ADD_EARLY_WARN_UNUSED`）破坏的类体内部，属于错误恢复路径变化产生的连锁诊断；注解宏中和完成后必须复查。
+
+下面的根因统计与消融实验是启用分支选择之前的数据。
 
 #### 根因统计方法
 
@@ -610,7 +700,10 @@ protobuf 的 `objectivec/` 目录是 Objective-C 源码，之前未被排除，4
 
 #### 消除计划
 
-1. 设计并实现保持字节偏移不变的轻量预处理：条件编译分支选择、注解宏中和（宏表限定在本文件及其包含的头文件）、常见外部宏和语句宏识别。每一步都必须用 E2E 证明诊断减少，且原本干净的文件不新增错误。
+1. 设计并实现保持字节偏移不变的轻量预处理，每一步都必须用 E2E 证明诊断减少，且原本无诊断的文件不新增诊断：
+   - ✅ 条件编译分支选择，见“条件编译分支选择”。
+   - ❌ 注解宏中和，宏表限定在本文件及其包含的头文件内。
+   - ❌ 常见外部宏和语句宏识别。
 2. 对剩余诊断逐条确认根因。grammar 缺陷列为已知豁免并单独统计，同时评估向上游提交修复或固定到包含修复的上游提交。
 
 ## 验收标准
@@ -647,10 +740,13 @@ protobuf 的 `objectivec/` 目录是 Objective-C 源码，之前未被排除，4
 - ✅ 运行单元测试与 Race Detector 通过（`go test`、`go test -race`、`go vet`、`gofmt` 均通过）。
 - ✅ 单元正确性：每个 fixture 的语法树与诊断均与 golden 精确一致，故意语法错误 fixture 全部触发对应诊断，合法 fixture 无多余诊断，系统失败=0。
 - ✅ 根目录共享五个 E2E Git submodule 并记录真实 commit、Star 数和源码文件数，Parser 模块不再持有重复副本。
-- ❌ E2E 零错误：系统失败为 0，全部生成语法树，输出与 expected 一致；但 junit 6 个、redis 53 个、protobuf 407 个文件仍含语法错误，见“E2E 语法错误现状”。
+- ❌ E2E 零错误：系统失败为 0，全部生成语法树，输出与 expected 一致；但 junit 6 个、redis 43 个、protobuf 374 个文件仍含语法错误，见“E2E 语法错误现状”。
 - ✅ 纠正语料与文档：排除 protobuf `objectivec/`，更正 grammar 版本、junit 错误来源和“已排除 Objective-C”的错误说法。
 - ✅ 完成多轮资源基线 `TestE2EResourceBaseline`：普通 E2E 三轮均为全部共享源码文件成功生成语法树、系统失败=0、耗时波动=1.00x、峰值 `HeapSys=11960320` 字节；Race E2E 三轮同样全部成功、系统失败=0、耗时波动=1.00x、峰值 `HeapSys=11829248` 字节，均满足波动<3x、`HeapSys<4 GiB` 的固定退化保护。
 - ✅ 明确 `FileID` 只在同一分析任务内唯一、`Path` 为项目内相对路径的规则；`SyntaxTree` 新增 `Path()`，单元测试 `TestSyntaxTreeKeepsFileIdentity` 先失败后通过；E2E 改为传入项目内相对路径。
+- ✅ 条件编译分支选择：设计、15 个 C/C++ fixture 与手写报告 golden、失败测试（6 个合法 fixture 在旧实现上报诊断）、实现；单元测试全部通过。
+- ✅ 条件编译分支选择 E2E：redis 含错文件 53→43、protobuf 407→374，原本无诊断的文件新增诊断数为 0；Java、Go、Python 语法树摘要不变；expected 增加报告摘要和按原样解析的对照字段。
+- ✅ 合法 fixture 的诊断检查改为必须为零，删除原来“误报率低于 30%”的比例阈值。
 - ✅ 回归覆盖：`ParseCtx` 空指针缺陷由 `TestParseContextCanceled` 固定回归；解析行为层暂无其他已修复缺陷，`regression/` 目录预留。
 
 ### 实现与验证说明
