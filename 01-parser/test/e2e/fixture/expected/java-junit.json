@@ -9,6 +9,16 @@
     "diagnostic_files": 6,
     "diagnostic_files_by_extension": {".java": 6},
     "syntax_tree_sha256": "de8a0726adcad7c991ea33f97c1cdf60edf061ecc47bb871301186013473e2e4",
-    "diagnostics_sha256": "264f8e75065ba1ed12351106e54b91b0c8aef98deeb9f651234d03c19a3bc588"
+    "diagnostics_sha256": "264f8e75065ba1ed12351106e54b91b0c8aef98deeb9f651234d03c19a3bc588",
+    "preprocess_branches": 0,
+    "preprocess_taken_branches": 0,
+    "preprocess_unknown_branches": 0,
+    "preprocess_blanked_bytes": 0,
+    "preprocess_unterminated": 0,
+    "preprocess_sha256": "dfd7086a46ac040bf868e7ba4ca7e32e509be5b073dc13621bf0353ad4e43950",
+    "raw_diagnostic_files": 6,
+    "fixed_by_preprocess_files": 0,
+    "new_diagnostic_files": 0,
+    "increased_diagnostic_files": 0
   }
 }

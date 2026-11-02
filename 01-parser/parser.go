@@ -56,25 +56,37 @@ func rawParse(ctx context.Context, content []byte, lang Language) (tree *ts.Tree
 	return tree, count, coveredBytes, nil
 }
 
+// parseView 返回指定语言实际交给 Tree-sitter 的源码：C/C++ 默认为条件编译分支选择后的视图，其余为原始源码。
+func parseView(file SourceFile, lang Language, options ParseOptions) ([]byte, *PreprocessReport) {
+	if options.RawSource || (lang != LanguageC && lang != LanguageCPP) {
+		return file.Content, nil
+	}
+	view, report := BuildConditionalView(file.Content, lang)
+	return view, &report
+}
+
 // parseSingle 用单一 grammar 解析并包装结果。
 func (p *treeParser) parseSingle(ctx context.Context, file SourceFile, lang Language, options ParseOptions) (ParseResult, error) {
-	tree, _, _, err := rawParse(ctx, file.Content, lang)
+	view, report := parseView(file, lang, options)
+	tree, _, _, err := rawParse(ctx, view, lang)
 	if err != nil {
 		return ParseResult{}, err
 	}
-	return p.buildResult(file, lang, tree, options, nil), nil
+	return p.buildResult(file, lang, tree, options, nil, report), nil
 }
 
 // parseHeader 对 .h 头文件分别用 C 与 C++ grammar 解析，按错误节点数、错误覆盖字节、C++ 优先的固定规则择优。
 func (p *treeParser) parseHeader(ctx context.Context, file SourceFile, options ParseOptions) (ParseResult, error) {
-	cTree, cCount, cBytes, cErr := rawParse(ctx, file.Content, LanguageC)
+	cView, cReport := parseView(file, LanguageC, options)
+	cTree, cCount, cBytes, cErr := rawParse(ctx, cView, LanguageC)
 	if isContextErr(cErr) {
 		if cTree != nil {
 			cTree.Close()
 		}
 		return ParseResult{}, cErr
 	}
-	cppTree, cppCount, cppBytes, cppErr := rawParse(ctx, file.Content, LanguageCPP)
+	cppView, cppReport := parseView(file, LanguageCPP, options)
+	cppTree, cppCount, cppBytes, cppErr := rawParse(ctx, cppView, LanguageCPP)
 	if isContextErr(cppErr) {
 		if cTree != nil {
 			cTree.Close()
@@ -91,11 +103,11 @@ func (p *treeParser) parseHeader(ctx context.Context, file SourceFile, options P
 	// 其中一次系统性失败时直接采用成功的一次。
 	if cErr != nil {
 		return p.buildResult(file, LanguageCPP, cppTree, options,
-			&HeaderResolution{CPPErrorCount: cppCount, CPPErrorBytes: cppBytes, Chosen: LanguageCPP}), nil
+			&HeaderResolution{CPPErrorCount: cppCount, CPPErrorBytes: cppBytes, Chosen: LanguageCPP}, cppReport), nil
 	}
 	if cppErr != nil {
 		return p.buildResult(file, LanguageC, cTree, options,
-			&HeaderResolution{CErrorCount: cCount, CErrorBytes: cBytes, Chosen: LanguageC}), nil
+			&HeaderResolution{CErrorCount: cCount, CErrorBytes: cBytes, Chosen: LanguageC}, cReport), nil
 	}
 	res := &HeaderResolution{
 		CErrorCount:   cCount,
@@ -107,10 +119,10 @@ func (p *treeParser) parseHeader(ctx context.Context, file SourceFile, options P
 	res.Chosen = chosen
 	if chosen == LanguageC {
 		cppTree.Close()
-		return p.buildResult(file, LanguageC, cTree, options, res), nil
+		return p.buildResult(file, LanguageC, cTree, options, res, cReport), nil
 	}
 	cTree.Close()
-	return p.buildResult(file, LanguageCPP, cppTree, options, res), nil
+	return p.buildResult(file, LanguageCPP, cppTree, options, res, cppReport), nil
 }
 
 // chooseHeaderLanguage 按固定规则在 C 与 C++ 之间择优：错误节点数少者胜；相等则错误覆盖字节少者胜；仍相等选 C++。
@@ -130,8 +142,8 @@ func chooseHeaderLanguage(cCount, cppCount int, cBytes, cppBytes uint) Language 
 	return LanguageCPP
 }
 
-// buildResult 把选中的底层树包装为 SyntaxTree 并按需收集诊断，组装成解析结果。
-func (p *treeParser) buildResult(file SourceFile, lang Language, tree *ts.Tree, options ParseOptions, header *HeaderResolution) ParseResult {
+// buildResult 把选中的底层树包装为 SyntaxTree 并按需收集诊断，组装成解析结果；语法树保留原始源码供节点取文本。
+func (p *treeParser) buildResult(file SourceFile, lang Language, tree *ts.Tree, options ParseOptions, header *HeaderResolution, report *PreprocessReport) ParseResult {
 	st := &syntaxTree{
 		lang:    lang,
 		fileID:  file.ID,
@@ -148,6 +160,7 @@ func (p *treeParser) buildResult(file SourceFile, lang Language, tree *ts.Tree, 
 		Tree:        st,
 		Diagnostics: diags,
 		Header:      header,
+		Preprocess:  report,
 	}
 }
 

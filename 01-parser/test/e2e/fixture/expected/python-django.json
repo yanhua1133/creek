@@ -9,6 +9,16 @@
     "diagnostic_files": 0,
     "diagnostic_files_by_extension": {},
     "syntax_tree_sha256": "49a4dccb3985f8029822dbbcedacc11ddae6c7a900d16d8d53887a05772b1691",
-    "diagnostics_sha256": "dd855c42458da8944bbdbe6d0c7b308d396a12b8b28f7bea1f469a7a8c101f1a"
+    "diagnostics_sha256": "dd855c42458da8944bbdbe6d0c7b308d396a12b8b28f7bea1f469a7a8c101f1a",
+    "preprocess_branches": 0,
+    "preprocess_taken_branches": 0,
+    "preprocess_unknown_branches": 0,
+    "preprocess_blanked_bytes": 0,
+    "preprocess_unterminated": 0,
+    "preprocess_sha256": "09d99aa9121eea2da14b4f5287eb15a9c8ca50f8c4dbd32d6746584a1ce16a24",
+    "raw_diagnostic_files": 0,
+    "fixed_by_preprocess_files": 0,
+    "new_diagnostic_files": 0,
+    "increased_diagnostic_files": 0
   }
 }
