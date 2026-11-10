@@ -104,12 +104,44 @@ func newConditionalScanner(content []byte, lang Language) *conditionalScanner {
 			s.lineStarts = append(s.lineStarts, i+1)
 		}
 	}
+	for name, value := range targetDefined {
+		s.macros[name] = macroState{defined: true, hasValue: true, value: value}
+	}
+	for _, name := range targetUndefined {
+		s.macros[name] = macroState{defined: false}
+	}
 	if s.cpp {
 		s.macros["__cplusplus"] = macroState{defined: true, hasValue: true, value: 201703}
+		s.macros["__GNUG__"] = macroState{defined: true, hasValue: true, value: 13}
+		s.macros["__STDC_VERSION__"] = macroState{defined: false}
 	} else {
 		s.macros["__cplusplus"] = macroState{defined: false}
+		s.macros["__GNUG__"] = macroState{defined: false}
+		s.macros["__STDC_VERSION__"] = macroState{defined: true, hasValue: true, value: 201710}
 	}
 	return s
+}
+
+// targetDefined 是默认目标配置（Linux x86_64、GCC 兼容编译器、标准头文件已包含）下已定义的宏及其值。
+var targetDefined = map[string]int64{
+	"__GNUC__": 13, "__GNUC_MINOR__": 0, "__GNUC_PATCHLEVEL__": 0, "__STDC__": 1, "__STDC_HOSTED__": 1,
+	"__linux__": 1, "__linux": 1, "__gnu_linux__": 1, "__unix__": 1, "__unix": 1, "__ELF__": 1,
+	"__x86_64__": 1, "__x86_64": 1, "__amd64__": 1, "__amd64": 1, "__LP64__": 1, "_LP64": 1,
+	"__CHAR_BIT__": 8, "__SIZEOF_INT__": 4, "__SIZEOF_LONG__": 8, "__SIZEOF_LONG_LONG__": 8, "__SIZEOF_POINTER__": 8,
+	"__SIZEOF_SIZE_T__": 8, "__ORDER_LITTLE_ENDIAN__": 1234, "__ORDER_BIG_ENDIAN__": 4321, "__BYTE_ORDER__": 1234,
+	"CHAR_BIT": 8, "INT_MAX": 2147483647, "UINT_MAX": 4294967295, "LONG_MAX": 9223372036854775807,
+	"LLONG_MAX": 9223372036854775807, "INT32_MAX": 2147483647, "UINT32_MAX": 4294967295,
+	"INT64_MAX": 9223372036854775807, "INTPTR_MAX": 9223372036854775807, "PTRDIFF_MAX": 9223372036854775807,
+	"SIZE_MAX": 9223372036854775807, "UINTPTR_MAX": 9223372036854775807, "UINT64_MAX": 9223372036854775807,
+	"ULONG_MAX": 9223372036854775807, "ULLONG_MAX": 9223372036854775807,
+}
+
+// targetUndefined 是默认目标配置下确定未定义的平台和编译器宏。
+var targetUndefined = []string{
+	"_WIN32", "_WIN64", "WIN32", "_MSC_VER", "__MINGW32__", "__MINGW64__", "__CYGWIN__", "__MSYS__",
+	"__APPLE__", "__MACH__", "__FreeBSD__", "__OpenBSD__", "__NetBSD__", "__DragonFly__", "__sun", "__SVR4",
+	"_AIX", "__HAIKU__", "__ANDROID__", "__EMSCRIPTEN__", "__wasm__", "__clang__", "__INTEL_COMPILER",
+	"__aarch64__", "__arm__", "__i386__", "__powerpc__", "__ppc64__", "__s390x__", "__riscv",
 }
 
 // active 报告当前位置是否保留在解析视图中。

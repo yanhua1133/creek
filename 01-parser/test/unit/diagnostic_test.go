@@ -27,6 +27,7 @@ var legalFixtures = []string{
 	"fixture/c/positive/cond_if_zero.c",
 	"fixture/c/positive/cond_in_function.c",
 	"fixture/c/positive/cond_nested.c",
+	"fixture/c/positive/cond_target.c",
 	"fixture/c/regression/cond_continuation.c",
 	"fixture/c/boundary/cond_comment_string.c",
 	"fixture/c/boundary/cond_unterminated.c",
