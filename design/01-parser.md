@@ -2,7 +2,7 @@
 
 ## 结论
 
-Parser 模块使用官方 Go 绑定 `github.com/tree-sitter/go-tree-sitter`，分别接入 Tree-sitter 官方维护的 C、C++、Java、Go 和 Python grammar。模块只负责源码识别、C/C++ 条件编译分支选择、语法解析、错误恢复、语法树访问和源码位置映射，不承担宏展开、类型推导、名称解析、common AST 或 IR 构建。
+Parser 模块使用官方 Go 绑定 `github.com/tree-sitter/go-tree-sitter`，分别接入 Tree-sitter 官方维护的 C、C++、Java、Go 和 Python grammar。模块只负责源码识别、C/C++ 轻量预处理（条件编译分支选择和宏中和，均保持字节偏移不变）、语法解析、错误恢复、语法树访问和源码位置映射，不承担完整宏展开、类型推导、名称解析、common AST 或 IR 构建。
 
 测试严格拆分为两个独立目录：
 
@@ -13,6 +13,7 @@ Parser 模块使用官方 Go 绑定 `github.com/tree-sitter/go-tree-sitter`，�
 ├── diagnostic.go
 ├── tree.go
 ├── preprocess.go
+├── macro.go
 ├── node.go
 └── test/
     ├── unit/
@@ -20,12 +21,14 @@ Parser 模块使用官方 Go 绑定 `github.com/tree-sitter/go-tree-sitter`，�
     │   ├── language_test.go
     │   ├── diagnostic_test.go
     │   ├── preprocess_test.go
+    │   ├── macro_test.go
     │   └── fixture/
     │       ├── c/
     │       ├── cpp/
     │       ├── java/
     │       ├── go/
-    │       └── python/
+    │       ├── python/
+    │       └── macro/
     └── e2e/
         ├── parser_e2e_test.go
         ├── resource_e2e_test.go
@@ -56,7 +59,7 @@ Parser 模块使用官方 Go 绑定 `github.com/tree-sitter/go-tree-sitter`，�
 
 ## 非目标
 
-- 不展开 C/C++ 宏，不处理 `#include`，不执行完整的 C 预处理器；只做保持字节偏移不变的条件编译分支选择。
+- 不执行完整的 C 预处理器：不处理 `#include`，不按编译构建的头文件顺序展开宏；只做保持字节偏移不变的条件编译分支选择和宏中和，见“条件编译分支选择”和“轻量容错宏预处理”。
 - 不解析编译数据库、构建脚本或依赖下载流程；项目加载能力另行设计。
 - 不执行类型检查、名称解析、符号绑定或调用目标解析。
 - 不把 Tree-sitter concrete syntax tree 直接定义为 common AST。
@@ -79,6 +82,7 @@ Parser 模块使用官方 Go 绑定 `github.com/tree-sitter/go-tree-sitter`，�
 - 注册并管理五种语言 grammar。
 - 根据文件扩展名自动选择 grammar，并对 `.h` 文件执行 C 与 C++ 双重解析。
 - 按请求解析 UTF-8 源码。
+- C/C++ 解析前的条件编译分支选择和宏中和。
 - 包装 Tree-sitter tree、node、point 和 range。
 - 收集 `ERROR` 节点、`MISSING` 节点和解析失败诊断。
 - 提供确定性的节点遍历、字段访问和源码切片能力。
@@ -86,7 +90,7 @@ Parser 模块使用官方 Go 绑定 `github.com/tree-sitter/go-tree-sitter`，�
 
 ### Parser 不负责
 
-- C/C++ 宏展开、头文件展开，以及依赖外部配置的条件求值。
+- C/C++ 完整宏展开、头文件展开，以及依赖外部配置的条件求值。
 - Java classpath、Go module、Python import path 或 C/C++ include path 解析。
 - 语义级声明、引用、类型或作用域计算。
 - 过滤业务上“不重要”的语法节点。
@@ -166,8 +170,14 @@ type SourceFile struct {
 type ParseOptions struct {
     // CollectDiagnostics 指定是否收集语法错误和缺失节点诊断。
     CollectDiagnostics bool
-    // RawSource 为真时直接解析原始源码，不做 C/C++ 条件编译分支选择。
+    // RawSource 为真时直接解析原始源码，不做任何 C/C++ 预处理。
     RawSource bool
+    // ConditionalOnly 为真时只做条件编译分支选择，不做宏中和，用于对照和排查。
+    ConditionalOnly bool
+    // Macros 是项目级宏定义索引，为空时宏中和只使用本文件内的定义。
+    Macros *MacroIndex
+    // CollectMetrics 指定是否记录各处理环节的耗时，默认关闭。
+    CollectMetrics bool
 }
 
 // ParseResult 保存语法树和解析过程中产生的诊断。
@@ -182,6 +192,10 @@ type ParseResult struct {
     Header *HeaderResolution
     // Preprocess 记录最终选中语言对应的条件编译分支选择结果，非 C/C++ 文件或 RawSource 为真时为空。
     Preprocess *PreprocessReport
+    // Macros 记录最终选中语言对应的宏中和结果，非 C/C++ 文件、RawSource 或 ConditionalOnly 为真时为空。
+    Macros *MacroReport
+    // Metrics 记录各处理环节耗时，CollectMetrics 为假时为空。
+    Metrics *ParseMetrics
 }
 
 // Diagnostic 表示一个可以定位到源码范围的解析问题。
@@ -225,6 +239,15 @@ type Parser interface {
 
 // BuildConditionalView 为 C/C++ 源码生成条件编译分支选择后的解析视图和报告，视图与原文件等长。
 func BuildConditionalView(content []byte, lang Language) ([]byte, PreprocessReport)
+
+// BuildMacroIndex 扫描项目头文件中的 #define，建立按目录距离查找的宏定义索引；非宏定义文件被忽略。
+func BuildMacroIndex(files []SourceFile) *MacroIndex
+
+// IsMacroDefinitionFile 报告路径是否属于宏定义索引收录的头文件类型。
+func IsMacroDefinitionFile(path string) bool
+
+// BuildMacroView 在条件编译视图上做宏中和，返回与原文件等长的解析视图和报告；index 可以为空。
+func BuildMacroView(view []byte, path string, lang Language, index *MacroIndex) ([]byte, MacroReport)
 
 // SyntaxTree 表示一次解析生成且需要显式关闭的语法树。
 type SyntaxTree interface {
@@ -304,9 +327,9 @@ Parser 模块使用同一个实现和同一套接口处理 C 与 C++；底层 Tr
 ## 处理流程
 
 1. 校验上下文、文件 ID、路径和源码大小。
-2. 根据扩展名确定单 grammar 解析或 `.h` 双 grammar 解析。C/C++ 按本次使用的 grammar 生成条件编译分支选择后的解析视图，见“条件编译分支选择”。
+2. 根据扩展名确定单 grammar 解析或 `.h` 双 grammar 解析。C/C++ 按本次使用的 grammar 先做条件编译分支选择，再在其结果上做宏中和，得到与原文件等长的解析视图，见“条件编译分支选择”和“轻量容错宏预处理”。
 3. 创建或从受控池中取得对应 grammar 的 Parser 实例。
-4. 设置 grammar 并解析 UTF-8 字节；C/C++ 解析的是解析视图，语法树节点的 `Text` 仍返回原始源码。
+4. 设置 grammar 并解析 UTF-8 字节；C/C++ 解析的是解析视图，语法树节点的 `Text` 仍返回原始源码，只有完全落在一次宏改写范围内的节点返回写入的关键字。
 5. `.h` 文件比较 C 与 C++ 两次解析结果并选择错误更少的语法树。
 6. 关闭未被选择的语法树，包装选中语法树并转移底层 tree 所有权。
 7. 遍历选中语法树并收集 `ERROR` 与 `MISSING` 诊断。
@@ -390,6 +413,127 @@ type PreprocessReport struct {
 - 单元测试校验解析视图与原文件等长，且被替换的位置在原文件中不是换行符。
 - E2E expected 增加报告摘要：分支数、保留分支数、未知条件分支数、替换字节数、缺少 `#endif` 的块数和报告 SHA-256。
 - E2E 对每个文件再按原样解析一次作对照，expected 锁定按原样解析时的含错文件数、因分支选择变为无诊断的文件数、原本无诊断却新增诊断的文件数（必须为 0）和诊断条数增多的文件数。
+
+## 轻量容错宏预处理
+
+### 结论
+
+条件编译分支选择之后、交给 Tree-sitter 之前，Parser 对 C/C++ 再做一步宏中和：把会破坏语法结构的宏调用，在原位置改写为其展开结果中的说明符关键字，或整体替换为空格。宏定义不按编译构建的头文件顺序查找，而是假设“项目里至少存在一个定义”，在项目全部头文件中按目录距离就近选取。整个过程不读取 include path、编译数据库或构建脚本，与编译构建解耦；改写保持文件长度和全部字节偏移不变，诊断和节点范围仍直接对应原始源码。
+
+动机见“E2E 语法错误现状”：分支选择后 protobuf 仍有 1.6% 的语法树节点处于错误子树中，消融实验表明其中约三分之二来自 `PROTOBUF_EXPORT`、`PROTOBUF_NULLABLE`、`UPB_INLINE` 这类注解宏。它们留作标识符时被当成类型名或声明符，破坏整条声明，并在类体、函数体中连锁出错。
+
+### 处理对象
+
+只处理展开后只剩属性和说明符关键字的宏：
+
+- 对象式宏，例如 `#define PROTOBUF_EXPORT __attribute__((visibility("default")))`、`#define PROTOBUF_FINAL final`、`#define UPB_INLINE static __inline__`。
+- 函数式宏，展开后只剩属性和说明符关键字时整个调用连同参数一起改写，例如 `#define UPB_PRINTF(str, first) __attribute__((format(printf, str, first)))`。
+
+常量、表达式、语句和声明生成宏（如 `HANDLE_TYPE(...)`、`TEST(...)`）不改写：它们要么本来就能按普通标识符或调用表达式解析，要么展开后长度变化，无法在保持偏移的前提下写回，留给阶段二。
+
+### 宏定义索引
+
+- 调用方传入项目内全部受跟踪的宏定义文件，扩展名为 `.h`、`.hh`、`.hpp`、`.hxx`、`.inc`、`.inl`、`.ipp`、`.tpp`、`.def`，包括第三方目录，因为项目代码同样使用第三方库的宏。`.c`、`.cc` 等实现文件中的定义只对本文件可见，不进入索引。
+- 每个头文件分别按 C 和 C++ 规则做一遍条件编译扫描，为每条 `#define` 记录两种状态：
+  - 保留：位于分支选择保留的区域。
+  - 可达：未被确定为假的条件排除，即所在分支的条件不为假，且同组前面没有确定为真的分支。
+- 同一文件中，定义之后又在可达区域被 `#undef` 的宏不收录，它们是头文件内部的临时宏。
+- 索引建好后只读，可被并发解析共享。
+
+### 查找规则
+
+对文件 F 中的标识符 N，按以下顺序判断：
+
+1. N 是 C/C++ 关键字或编译器内建关键字（如 `inline`、`__attribute__`）时不处理。
+2. N 前面是 `.`、`->`、`::`，或后面是 `::` 时不处理，它们是成员或限定名。
+3. 本文件优先：F 中此前已保留的 `#define N` 生效；N 已被 `#undef` 时不处理，也不再查索引。
+4. 否则查索引：在 F 以外、对当前 grammar 存在可达定义的头文件中，选目录距离最小的一个；距离相同时选路径字典序最小的。目录距离等于从 F 所在目录到定义文件所在目录需要上溯和下行的目录层数之和。
+5. 在选中文件内，先按源码顺序尝试保留的定义；只有对象式宏才在保留的定义都不能改写时继续尝试其余可达定义。第一个能改写的定义生效；都不能改写时不处理，也不回退到更远的文件。
+
+第 5 条依据：条件未知时，各个分支都可能是真实构建配置。对象式宏留作标识符会破坏所在声明，此时能让代码通过解析的定义更可能是真实配置。例如 protobuf 的 `PROTOBUF_TSAN_DECLARE_MEMBER` 在 `#if defined(ABSL_HAVE_THREAD_SANITIZER)` 下是成员声明，在 `#else` 下为空；前者无法改写，因此取后者。函数式宏调用本身就能按调用表达式解析，回退只会删除代码，并与分支选择采用的配置不一致。例如 redis 的 `debugServerAssert(...)` 在 `#ifdef DEBUG_ASSERTIONS` 下是 `serverAssert(...)`，在 `#else` 下为空；保留的定义不能改写，因此不处理，调用保留在语法树中。
+
+### 改写规则
+
+1. 递归展开定义体，逐个处理记号：
+   - 丢弃属性：`__attribute__((...))`、`__attribute((...))`、`__declspec(...)`、`[[...]]`。
+   - 保留说明符关键字。C 为 `static`、`extern`、`const`、`volatile`、`register`、`restrict`、`__restrict`、`__restrict__`、`_Noreturn`、`_Thread_local`、`__thread`；C++ 在此基础上增加 `constexpr`、`consteval`、`constinit`、`virtual`、`explicit`、`final`、`override`、`noexcept`、`thread_local`、`mutable`。
+   - 可省略关键字：`inline`、`__inline`、`__inline__`、`__forceinline`。
+   - 标识符若是对象式宏，按同一查找规则递归展开；若是后跟括号的函数式宏，展开其定义体。递归深度上限为 16，宏在自身展开过程中不再展开。
+   - 其他任何记号，包括出现在属性之外的宏参数，都使该定义不可改写。
+2. 写回：保留下来的关键字用一个空格连接，长度不超过调用所占字节数时写在调用起始处，其余字节替换为空格；放不下时去掉可省略关键字重试；仍放不下则不改写，计为“放不下”。函数式宏调用从宏名到匹配的右括号，可以跨行，换行符保留，关键字只写在第一行内。
+3. 只改写已保留的代码，不改写预处理指令内部。
+4. 节点文本：节点范围完全落在一次宏改写范围内时（即由写入的关键字生成的节点），`Text` 返回写入的关键字，例如 `UPB_INLINE` 处生成的 `storage_class_specifier` 返回 `static`；其余节点仍返回原始源码，例如包含该调用的函数定义返回的文本里仍是 `UPB_INLINE`。节点范围始终对应原始源码。
+
+### 代价
+
+- 宏里的属性信息被丢弃，例如 `[[nodiscard]]`、`noreturn`；可省略关键字放不下时 `inline` 也会丢失。
+- 就近查找不等价于真实的 include 关系：同名宏在不同模块有不同定义时可能选错。E2E 用“宏中和后原本无诊断的文件新增诊断数必须为 0”作为守护，并锁定全部改写记录的摘要。
+- 距离相同时按路径字典序选取，报告中的定义来源可能不是真实来源。例如 protobuf 的 `PROTOBUF_EXPORT` 取自 `descriptor.h` 中 `#ifdef SWIG` 下的空定义，而不是 `port_def.inc`；两者改写结果相同。
+- 改写不只发生在影响解析的位置：保留定义为空的函数式宏调用会从语法树中消失，例如 redis 在 `#ifndef REDIS_TEST_VERBOSE` 下定义为空的 `D(...)`。这与分支选择采用的配置一致。
+- 定义不在项目内的外部宏（abseil、GoogleTest 等不在语料中）找不到定义，不处理。
+
+### 数据结构
+
+```go
+// MacroIndex 是项目级宏定义索引，按宏名保存各头文件中的定义，构建后只读。
+type MacroIndex struct {
+    // definitions 按宏名保存全部收录的定义，同名定义按文件路径和源码顺序排列。
+    definitions map[string][]indexedMacro
+}
+
+// MacroRewrite 记录一次宏调用改写。
+type MacroRewrite struct {
+    // Range 是被改写的宏调用范围，函数式宏包含参数和右括号。
+    Range SourceRange
+    // Name 是宏名。
+    Name string
+    // Replacement 是写在调用起始处的关键字文本，为空表示整个调用替换为空格。
+    Replacement string
+    // DefinitionPath 是生效定义所在文件的项目内相对路径。
+    DefinitionPath string
+    // DefinitionLine 是生效定义所在的行号，从 1 开始。
+    DefinitionLine int
+}
+
+// MacroReport 记录一次宏中和的结果。
+type MacroReport struct {
+    // Rewrites 是按源码顺序排列的全部改写。
+    Rewrites []MacroRewrite
+    // Unsupported 是找到定义、但展开含不可改写记号而未改写的宏调用数。
+    Unsupported int
+    // TooLong 是展开可以改写、但关键字放不下而未改写的宏调用数。
+    TooLong int
+}
+
+// ParseMetrics 记录一次解析中各处理环节的耗时，.h 文件为两次解析之和。
+type ParseMetrics struct {
+    // Conditional 是条件编译分支选择耗时。
+    Conditional time.Duration
+    // Macro 是宏中和耗时。
+    Macro time.Duration
+    // TreeSitter 是 Tree-sitter 解析耗时。
+    TreeSitter time.Duration
+}
+```
+
+### 测试
+
+- 单元 fixture 是一个独立的小项目 `fixture/macro/`，覆盖：就近选择与远处同名定义、实现文件中的定义不进入索引、头文件内 `#undef` 的临时宏不收录、`_MSC_VER` 下不可达的定义、条件未知时取第一个能改写的定义、嵌套宏、函数式属性宏（含跨行调用）、C 与 C++ 不同展开、可省略关键字、放不下、常量宏、循环定义、本文件定义优先与 `#undef`、关键字同名宏、成员访问和限定名。
+- 回归：函数式宏的保留定义不能改写时不得回退到其他可达定义（redis `debugServerAssert`）。
+- 节点文本：宏改写生成的关键字节点返回关键字，包含宏调用的外层节点返回原始源码。
+- 每个使用文件除语法树 golden 外，另有一份带索引解析的宏报告 golden，逐条记录改写位置、宏名、写入文本、定义文件和行号，以及未改写计数。
+- 单元测试校验宏中和视图与原文件等长、换行位置不变，改动字节全部落在报告的改写范围内；校验索引构建与输入文件顺序无关，并发共享索引在 Race Detector 下通过。
+- E2E 用项目全部受跟踪的宏定义文件建索引，对每个 C/C++ 文件分别按原样、只做分支选择、完整预处理解析三次。expected 锁定三种方式的含错文件数、错误行数和错误节点数，改写总数、未改写计数和改写记录 SHA-256，宏中和使之变为无诊断的文件数，以及原本无诊断却新增诊断的文件数（必须为 0）。
+
+### 可观测性与性能
+
+- `ParseResult.Macros` 逐条记录改写位置、宏名、写入文本、定义文件和行号，以及未改写计数，可单独验证宏中和是否正确。
+- `ParseOptions.CollectMetrics` 打开后，`ParseResult.Metrics` 分别给出分支选择、宏中和、Tree-sitter 解析的耗时；默认关闭，不影响结果和性能。
+- 实测（全量 E2E 语料，单线程）：protobuf 建索引读取 627 个宏定义文件，耗时 0.23 s；1095 个文件的分支选择共 0.30 s，宏中和 0.42 s，Tree-sitter 解析 10.67 s，宏中和约占 4%。redis 建索引 314 个文件 0.14 s；宏中和 0.13 s，Tree-sitter 解析 2.63 s。
+
+### 阶段二（未实现）
+
+展开函数式宏和长度变化的对象式宏需要源码映射：解析视图不再与原文件等长，语法树节点和诊断的范围要通过映射表换算回原文件，节点完全落在一次展开内时还要区分展开文本和调用处原文。这会改变 `Range` 和 `Text` 的语义，并影响 Common AST 按字节范围建立的索引，需要单独设计后实施。
 
 ## 错误处理
 
@@ -575,7 +719,7 @@ e2e-corpus/
 
 表中只展示一个对象结构，实际清单必须包含五个项目。`source_file_count` 在添加 submodule 时由脚本计算并替换为真实值，禁止保留零值。Star 数只在引入或升级 submodule 时联网核验；常规测试只读取共享清单并离线校验 commit 与源码文件数，避免 CI 依赖 GitHub API。
 
-Parser 每个 expected 文件必须明确包含：测试目的、`project_id`、源码文件数、成功语法树数、系统失败数、诊断文件数、按扩展名诊断计数、规范化语法树 SHA-256 和规范化诊断 SHA-256。测试逐字段比较实际结果与 expected，禁止只输出日志。
+Parser 每个 expected 文件必须明确包含：测试目的、`project_id`、源码文件数、成功语法树数、系统失败数、诊断文件数、按扩展名诊断计数、规范化语法树 SHA-256 和规范化诊断 SHA-256；以及条件编译报告摘要、宏中和报告摘要、宏定义索引文件数，按原样、只做分支选择、完整预处理三种方式的含错文件数、错误行数和错误节点数，和预处理新增、消除、增多诊断的文件数。测试逐字段比较实际结果与 expected，禁止只输出日志。
 
 资源基线使用独立的 `resource-baseline.json` 明确记录测试目的、覆盖的五个共享项目和逐项阈值。测试连续执行三轮全量解析，每轮都必须覆盖全部共享源码文件（当前 6728 个）并全部生成可访问的语法树；三轮累计系统失败必须为零，最长轮次与最短轮次的耗时比必须小于 `3`，各轮结束时观测到的 Go 堆 `HeapSys` 峰值必须小于 `4 GiB`。资源测试关闭诊断收集并立即关闭每棵语法树，只度量 Parser 解析和资源释放路径，不重复计算结构摘要。
 
@@ -628,53 +772,56 @@ Parser 是分析流水线的**中间步骤**，不产出漏洞报告，因此没
 
 ### E2E 语法错误现状（未达标）
 
-E2E 中含 `ERROR` 或 `MISSING` 节点的文件不是正确结果。E2E expected 锁定当前输出，只用于发现输出变化，不代表这些语法树正确。C、C++ 和 Java 仍有含语法错误的文件，未达到零错误，Parser 的 E2E 正确性验收为 ❌。
+E2E 中含 `ERROR` 或 `MISSING` 节点的文件不是正确结果；expected 只锁定当前输出以发现变化，不代表这些语法树正确。C、C++ 和 Java 仍未达到零错误，Parser 的 E2E 正确性验收为 ❌。
 
-当前统计（protobuf 已排除 `objectivec/`，已启用条件编译分支选择和默认目标配置）：
+#### 错误率口径
 
-| 项目 | 语言 | 含 ERROR/MISSING 文件 | 按原样解析时含错文件 | 纳入文件总数 |
-|---|---|---:|---:|---:|
-| go-git | Go | 0 | 0 | 690 |
-| django | Python | 0 | 0 | 2927 |
-| junit-framework | Java | 6 | 6 | 1738 |
-| redis | C | 43 | 53 | 278 |
-| protobuf | C++ | 372 | 407 | 1095 |
+- 文件错误率 = 含 `ERROR`/`MISSING` 节点的文件数 / 纳入文件数。
+- 行错误率 = 被 `ERROR` 节点覆盖或含 `MISSING` 节点的非空行数 / 非空行数。
+- 节点错误率 = 位于 `ERROR`/`MISSING` 子树中的节点数 / 语法树节点总数，含匿名节点。
 
-条件编译分支选择使 redis 10 个、protobuf 35 个文件变为无诊断，没有任何原本无诊断的文件新增诊断。其中默认目标配置使 redis 未知条件分支 752→546、protobuf 3547→3262，protobuf 含错文件 374→372，redis 含错文件数不变。protobuf 有 3 个原本就含诊断的文件诊断条数略增：`map_entry.h` 7→8、`message.h` 77→78、`repeated_field_proxy.h` 62→65。新增诊断全部位于按原样解析时第一处错误之后，即已被注解宏（如 `PROTOBUF_FUTURE_ADD_EARLY_WARN_UNUSED`）破坏的类体内部，属于错误恢复路径变化产生的连锁诊断；注解宏中和完成后必须复查。
+三项计数由 Parser E2E 按原样、只做分支选择、完整预处理三种方式分别统计并锁定在 expected 中。只统计 Tree-sitter 明确标出的错误；宏导致的结构合法但含义错误的树（如把 `TEST(A, B) {...}` 解析成函数定义）不计入，因此是下限。
 
-下面的根因统计与消融实验是启用分支选择之前的数据。
+#### 当前错误率
 
-#### 根因统计方法
+| 项目 | 语言 | 解析方式 | 文件 | 行 | 节点 |
+|---|---|---|---:|---:|---:|
+| redis | C | 原样 | 53/278（19.06%） | 850/206778（0.411%） | 3824/1854347（0.206%） |
+| redis | C | 分支选择 | 43/278（15.47%） | 766/206778（0.370%） | 3399/1827984（0.186%） |
+| redis | C | 完整预处理 | 32/278（11.51%） | 285/206778（0.138%） | 481/1826038（0.026%） |
+| protobuf | C++ | 原样 | 407/1095（37.17%） | 88279/446475（19.772%） | 845280/4323402（19.551%） |
+| protobuf | C++ | 分支选择 | 372/1095（33.97%） | 18378/446475（4.116%） | 64429/3977591（1.620%） |
+| protobuf | C++ | 完整预处理 | 185/1095（16.89%） | 3124/446475（0.700%） | 19722/3951763（0.499%） |
+| junit-framework | Java | 三种方式相同 | 6/1738（0.35%） | 10/189439（0.005%） | 87/1598382（0.005%） |
+| go-git | Go | 三种方式相同 | 0/690 | 0/131697 | 0/1353223 |
+| django | Python | 三种方式相同 | 0/2927 | 0/454158 | 0/4438252 |
 
-导出全部诊断，按诊断所在行及前两行的位置特征分类：含 `#if`、`#ifdef`、`#ifndef`、`#elif`、`#else`、`#endif` 的归为“条件编译分隔语法结构”；否则含宏形态标识符（大写加下划线、`va_arg`、`__attribute__` 等）的归为“宏或编译器扩展”；两者都不含的归为“未归因”。这只是位置特征，不等于根因已经证实。一个文件可能同时含多类诊断。
+完整预处理相对按原样解析和相对只做分支选择，原本无诊断却新增诊断的文件数、诊断条数增多的文件数均为 0。
 
-| 项目 | 只含宏类 | 只含条件编译类 | 宏和条件编译 | 含未归因诊断 |
-|---|---:|---:|---:|---:|
-| redis | 31 | 9 | 7 | 6 |
-| protobuf | 99 | 39 | 93 | 176 |
+#### 宏中和的动机
 
-未归因诊断大多落在合法 C++ 语句上，例如 `friend class X;`、`return true;`，抽样显示通常是前面的宏使整个类体或函数体解析失败后连锁产生的，但尚未逐个证实。
+分支选择后 protobuf 仍有 1.62% 的节点出错。消融实验在保持字节偏移的前提下改写源码后重新解析（实验代码不进仓库）：
 
-#### 消融实验
+| 处理方式（在分支选择基础上） | protobuf 节点错误率 | 含错文件 |
+|---|---:|---:|
+| 不处理 | 1.620% | 372 |
+| 仓库内定义为空、属性或关键字的对象式宏全局替换为空格 | 0.701% | 205 |
+| 再加 abseil 注解宏（不在语料中，手工列出） | 0.557% | 187 |
+| 再把三类 grammar 缺陷改成等长合法写法 | 0.551% | 186 |
 
-在保持字节偏移不变的前提下改写源码后重新解析：“宏替换”把项目中定义为空或只含属性的宏替换为空格；“条件编译取首分支”删除条件编译指令并清空非首分支。实验代码不进入仓库，结果如下：
+结论：剩余错误约三分之二来自注解宏，grammar 缺陷影响很小。全局替换会误伤同名普通标识符，因此实现改为按目录就近查找定义，见“轻量容错宏预处理”。
 
-| 处理方式 | protobuf 含错文件 | protobuf 诊断 | redis 含错文件 | redis 诊断 |
-|---|---:|---:|---:|---:|
-| 不处理 | 407 | 25768 | 53 | 1188 |
-| 宏替换 | 393 | 16549 | 68 | 710 |
-| 条件编译取首分支 | 377 | 18816 | 47 | 1137 |
-| 两者都做 | 357 | 10531 | 65 | 656 |
+#### 完整预处理后的剩余错误
 
-结论：
+按错误位置附近的宏名估计（位置特征，未逐条证实）：
 
-- 宏和条件编译是诊断的主要来源，两者都处理后 protobuf 诊断减少约 59%。
-- 全项目共用一张宏表会误伤普通标识符：redis 某处 `#define error ...` 被全局替换后，18 个原本干净的文件出现新错误。宏表必须限定在本文件及其包含的头文件内。
-- 仍有大量错误来自定义不在本仓库的外部宏，例如 GoogleTest 的 `TEST`、`MATCHER_P`，Python C API 的 `PyObject_HEAD`、`PyVarObject_HEAD_INIT`，abseil 的 `ABSL_*`，PHP 的 `ZEND_*`。
+- 函数式宏：约占 protobuf 剩余错误节点的 61%、redis 的 53%，例如展开为整段 `case` 的 `HANDLE_TYPE(...)`、GoogleTest 的 `TEST`/`EXPECT_*`、`PROTOBUF_DEFINE_*_ACCESSOR(...)`、redis 配置表宏 `MEMORY_CONFIG(...)`。需要阶段二的源码映射展开。
+- 定义不在语料中的外部宏：abseil 的 `ABSL_ATTRIBUTE_LIFETIME_BOUND`、`ABSL_CHECK` 等。
+- grammar 缺陷，见下表。
 
 #### 已证实的 grammar 缺陷
 
-以下是 grammar 不支持的合法语法，与宏无关：
+以下合法语法在最小样例中单独解析也报错，与宏无关：
 
 | 语言 | 语法 | 位置 |
 |---|---|---|
@@ -682,6 +829,9 @@ E2E 中含 `ERROR` 或 `MISSING` 节点的文件不是正确结果。E2E expecte
 | Java | 可变参数类型注解 `Class<?> @Nullable... classes` | `ClassUtils.java`、`ReflectionUtils.java`，均为主代码 |
 | C++ | 带默认参数的右值引用限定成员函数 `SerializeText(TextSerializationOptions options = {}) &&;` | `conformance/testee.h:107` |
 | C++ | 依赖类型的函数式转换 `return typename T::Proxy();` | `hpb/backend/cpp/cpp.h:24` 等 |
+| C++ | 匿名且带底层类型的枚举 `enum : int { kX = 1 };` | protobuf 生成代码 `*.pb.h` 等共 70 处 |
+| C++ | 模板默认类型实参含 const、引用或指针 `template <typename T = const int&>` | `*.pb.h` 字段访问器 |
+| C++ | new 指针数组 `new int*[n]()` | `generated_message_reflection.cc:213` |
 
 当前接入的 tree-sitter-cpp v0.23.4 和 tree-sitter-java v0.23.5 都已是对应 Go 模块的最新版本标签。
 
@@ -689,7 +839,7 @@ E2E 中含 `ERROR` 或 `MISSING` 节点的文件不是正确结果。E2E expecte
 
 protobuf 的 `objectivec/` 目录是 Objective-C 源码，之前未被排除，40 个文件被当作 C/C++ 解析，其中 36 个出错，共 3011 条诊断。现已加入 `excluded_paths`。
 
-排除路径及原因：
+排除路径及原因（只影响测试范围；宏定义索引仍读取这些目录中的头文件）：
 
 | 项目 | 排除路径 | 原因 |
 |---|---|---|
@@ -700,11 +850,12 @@ protobuf 的 `objectivec/` 目录是 Objective-C 源码，之前未被排除，4
 
 #### 消除计划
 
-1. 设计并实现保持字节偏移不变的轻量预处理，每一步都必须用 E2E 证明诊断减少，且原本无诊断的文件不新增诊断：
-   - ✅ 条件编译分支选择，见“条件编译分支选择”。
-   - ✅ 默认目标配置（Linux x86_64、GCC 13）参与条件求值。
-   - ❌ 注解宏中和，宏表限定在本文件及其包含的头文件内。
-   - ❌ 常见外部宏和语句宏识别。
+1. 保持字节偏移的轻量预处理，每一步都必须用 E2E 证明错误减少，且原本无诊断的文件不新增诊断：
+   - ✅ 条件编译分支选择。
+   - ✅ 默认目标配置（Linux x86_64、GCC 13）。
+   - ✅ 注解宏中和，宏定义按目录就近查找。
+   - ❌ 函数式宏和长度变化的宏展开（阶段二，需要源码映射）。
+   - ❌ 语料中没有定义的外部宏（abseil、GoogleTest）：评估内置常见外部注解宏表。
 2. 对剩余诊断逐条确认根因。grammar 缺陷列为已知豁免并单独统计，同时评估向上游提交修复或固定到包含修复的上游提交。
 
 ## 验收标准
@@ -741,7 +892,7 @@ protobuf 的 `objectivec/` 目录是 Objective-C 源码，之前未被排除，4
 - ✅ 运行单元测试与 Race Detector 通过（`go test`、`go test -race`、`go vet`、`gofmt` 均通过）。
 - ✅ 单元正确性：每个 fixture 的语法树与诊断均与 golden 精确一致，故意语法错误 fixture 全部触发对应诊断，合法 fixture 无多余诊断，系统失败=0。
 - ✅ 根目录共享五个 E2E Git submodule 并记录真实 commit、Star 数和源码文件数，Parser 模块不再持有重复副本。
-- ❌ E2E 零错误：系统失败为 0，全部生成语法树，输出与 expected 一致；但 junit 6 个、redis 43 个、protobuf 372 个文件仍含语法错误，见“E2E 语法错误现状”。
+- ❌ E2E 零错误：系统失败为 0，全部生成语法树，输出与 expected 一致；但 junit 6 个、redis 32 个、protobuf 185 个文件仍含语法错误，见“E2E 语法错误现状”。
 - ✅ 纠正语料与文档：排除 protobuf `objectivec/`，更正 grammar 版本、junit 错误来源和“已排除 Objective-C”的错误说法。
 - ✅ 完成多轮资源基线 `TestE2EResourceBaseline`：普通 E2E 三轮均为全部共享源码文件成功生成语法树、系统失败=0、耗时波动=1.00x、峰值 `HeapSys=11960320` 字节；Race E2E 三轮同样全部成功、系统失败=0、耗时波动=1.00x、峰值 `HeapSys=11829248` 字节，均满足波动<3x、`HeapSys<4 GiB` 的固定退化保护。
 - ✅ 明确 `FileID` 只在同一分析任务内唯一、`Path` 为项目内相对路径的规则；`SyntaxTree` 新增 `Path()`，单元测试 `TestSyntaxTreeKeepsFileIdentity` 先失败后通过；E2E 改为传入项目内相对路径。
@@ -749,7 +900,15 @@ protobuf 的 `objectivec/` 目录是 Objective-C 源码，之前未被排除，4
 - ✅ 条件编译分支选择 E2E：redis 含错文件 53→43、protobuf 407→374，原本无诊断的文件新增诊断数为 0；Java、Go、Python 语法树摘要不变；expected 增加报告摘要和按原样解析的对照字段。
 - ✅ 合法 fixture 的诊断检查改为必须为零，删除原来“误报率低于 30%”的比例阈值。
 - ✅ 回归覆盖：`ParseCtx` 空指针缺陷由 `TestParseContextCanceled` 固定回归；解析行为层暂无其他已修复缺陷，`regression/` 目录预留。
+- ✅ 轻量容错宏预处理设计：宏定义索引、就近查找、改写规则、代价、数据结构和测试方案，见“轻量容错宏预处理”。
 - ✅ 默认目标配置（Linux x86_64、GCC 13）纳入条件求值：新增 `fixture/c/positive/cond_target.c` 与手写报告 golden，去掉目标配置时 `_WIN32` 求值为未知、Windows 分支被保留，测试失败，加入后通过；E2E redis 未知条件分支 752→546、protobuf 3547→3262，protobuf 含错文件 374→372，原本无诊断的文件新增诊断为 0；Java、Go、Python 不变；`go test`、`go test -race` 单元测试通过。
+- ✅ 宏中和 fixture、手写报告 golden 与失败测试：小项目 `fixture/macro/` 共 9 个文件，7 份带索引宏报告 golden（含回归 fixture）和全部无索引宏报告 golden 均为手写；未实现时 `TestMacroLegalFilesHaveNoDiagnostics` 等 7 个测试失败。
+- ✅ 宏中和实现（`macro.go`），手写宏报告 golden 全部一致，宏小项目 5 个合法使用文件带索引解析后诊断为 0（其中 3 个只做分支选择时有诊断）；`go test`、`go test -race`、`go vet` 通过。
+- ✅ 宏中和 E2E：redis 含错文件 43→32、节点错误率 0.186%→0.026%，protobuf 372→185、1.620%→0.499%；相对原样和相对分支选择，新增诊断文件和诊断增多文件均为 0；Java、Go、Python 语法树与诊断摘要不变；expected 锁定三种解析方式的文件、行、节点错误数和宏中和报告摘要。资源基线三轮通过（耗时波动 1.05x，峰值 `HeapSys=37158912` 字节）。Common AST E2E 随之更新 expected，见 `design/02-ast.md`。
+- ✅ 记录文件、行、节点三种错误率及宏中和的消融动机，见“E2E 语法错误现状”。
+- ✅ 回归：E2E 抽查发现函数式宏回退到未保留的空定义会删除可正常解析的调用（redis `debugServerAssert` 46 处、protobuf `PROTOBUF_ASSUME` 61 处），规则改为函数式宏只用保留的定义；回归 fixture `fixture/macro/lib/regression/debug_assert.c` 在旧逻辑下失败、新逻辑下通过。
+- ✅ 节点文本：复查发现宏改写生成的关键字节点 `Text` 返回截断的宏名（如 `LIB_IN`），改为完全落在改写范围内的节点返回写入的关键字；`TestMacroRewrittenNodeText` 先失败后通过；E2E 只有 redis、protobuf 的语法树摘要变化，其余计数与摘要不变。
+- ✅ 宏中和后的项目级验证：`go build`、`go vet`、`gofmt`、Parser 与 Common AST 单元测试、`go test -race` 单元测试、Parser 与 Common AST E2E、Parser 资源基线 E2E、`go test -race -tags=e2e ./01-parser/test/e2e/` 全部通过。
 
 ### 实现与验证说明
 

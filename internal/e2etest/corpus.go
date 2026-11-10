@@ -122,6 +122,24 @@ func TrackedSourceFiles(repositoryRoot string, project Project) ([]string, error
 	return files, nil
 }
 
+// TrackedFiles 返回共享项目中全部受跟踪文件的项目内相对路径，不按扩展名和排除路径过滤，按字典序排列。
+// 用于建立宏定义索引等需要读取第三方目录的跨文件信息，不得用来替代 TrackedSourceFiles 决定测试范围。
+func TrackedFiles(repositoryRoot string, project Project) ([]string, error) {
+	directory := ProjectDirectory(repositoryRoot, project)
+	output, err := exec.Command("git", "-C", directory, "ls-files").Output()
+	if err != nil {
+		return nil, fmt.Errorf("列出共享项目文件失败 %s: %w", project.Repository, err)
+	}
+	var files []string
+	for _, line := range strings.Split(string(output), "\n") {
+		if relative := strings.TrimSpace(line); relative != "" {
+			files = append(files, relative)
+		}
+	}
+	sort.Strings(files)
+	return files, nil
+}
+
 // IsExcluded 报告相对路径是否命中任一排除前缀。
 func IsExcluded(relative string, excludedPaths []string) bool {
 	for _, prefix := range excludedPaths {

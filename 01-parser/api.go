@@ -16,8 +16,14 @@ type SourceFile struct {
 type ParseOptions struct {
 	// CollectDiagnostics 指定是否遍历语法树收集语法错误和缺失节点诊断。
 	CollectDiagnostics bool
-	// RawSource 为真时直接解析原始源码，不做 C/C++ 条件编译分支选择，用于对照和排查。
+	// RawSource 为真时直接解析原始源码，不做任何 C/C++ 预处理，用于对照和排查。
 	RawSource bool
+	// ConditionalOnly 为真时只做条件编译分支选择，不做宏中和，用于对照和排查。
+	ConditionalOnly bool
+	// Macros 是项目级宏定义索引，为空时宏中和只使用本文件内的定义。
+	Macros *MacroIndex
+	// CollectMetrics 指定是否记录各处理环节的耗时，默认关闭。
+	CollectMetrics bool
 }
 
 // DiagnosticKind 表示解析诊断问题的类型。
@@ -68,6 +74,10 @@ type ParseResult struct {
 	Header *HeaderResolution
 	// Preprocess 记录最终选中语言对应的条件编译分支选择结果，非 C/C++ 文件或 RawSource 为真时为空。
 	Preprocess *PreprocessReport
+	// Macros 记录最终选中语言对应的宏中和结果，非 C/C++ 文件、RawSource 或 ConditionalOnly 为真时为空。
+	Macros *MacroReport
+	// Metrics 记录各处理环节耗时，CollectMetrics 为假时为空。
+	Metrics *ParseMetrics
 }
 
 // Parser 定义单个源码文件的解析能力。
@@ -111,6 +121,6 @@ type Node interface {
 	ChildByField(name string) (Node, bool, error)
 	// FieldNameForChild 返回指定位置子节点对应的字段名称，无字段名时返回空字符串。
 	FieldNameForChild(index int) (string, error)
-	// Text 返回当前节点覆盖的源码内容的只读副本。
+	// Text 返回当前节点覆盖的源码内容的只读副本；完全落在一次宏改写范围内的节点返回写入的关键字。
 	Text() ([]byte, error)
 }

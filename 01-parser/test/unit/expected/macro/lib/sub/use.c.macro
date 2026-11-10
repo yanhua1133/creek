@@ -1,0 +1,4 @@
+rewrites 1
+unsupported 0
+too_long 0
+rewrite line=4 column=6 name=LIB_NULLABLE replacement="const" definition=fixture/macro/lib/sub/use.c:3

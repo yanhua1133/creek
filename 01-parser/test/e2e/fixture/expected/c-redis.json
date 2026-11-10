@@ -1,27 +1,53 @@
 {
-  "test_purpose": "全量解析 Redis 的 C 与头文件，验证每个文件都生成语法树，并锁定完整 CST 与诊断；该项目仍有文件含语法错误，expected 只锁定当前输出以发现变化，不代表这些语法树正确，见 design/01-parser.md“E2E 语法错误现状”",
+  "test_purpose": "全量解析 Redis 的 C 与头文件，验证每个文件都生成语法树，并锁定完整 CST 与诊断；该项目仍有文件含语法错误，expected 只锁定当前输出以发现变化，不代表这些语法树正确，见 design/01-parser.md“E2E 语法错误现状”；同时锁定按原样、只做分支选择、完整预处理（分支选择加宏中和，宏定义索引取自项目全部受跟踪的宏定义文件，含排除目录）三种解析方式的含错文件数、错误行数、错误节点数，以及宏中和报告摘要；预处理使原本无诊断的文件新增诊断的两项计数必须为 0",
   "project_id": "c-redis",
   "assertions": {
     "source_files": 278,
     "successful_trees": 278,
     "system_failures": 0,
     "total_bytes": 9226711,
-    "diagnostic_files": 43,
+    "diagnostic_files": 32,
     "diagnostic_files_by_extension": {
-      ".c": 40,
-      ".h": 3
+      ".c": 30,
+      ".h": 2
     },
-    "syntax_tree_sha256": "f4ff4b3629d3e80d6d5fc93e10ca09ea1e1c6b1e7088964a75b699f39ecec9b7",
-    "diagnostics_sha256": "3fa571b415b9ee89e664e5731ed8713eb7a151db4cb29c5082d30d17e2a1a8d0",
+    "syntax_tree_sha256": "cc47566d5a737e010602b920de7b178aa85270482b6b1d5a6430fcd21e233a86",
+    "diagnostics_sha256": "67da91b52928c40ee67773cfa8c07a473758926ed7e77cc8304d061004fc2e76",
     "preprocess_branches": 1013,
     "preprocess_taken_branches": 644,
     "preprocess_unknown_branches": 546,
     "preprocess_blanked_bytes": 106098,
     "preprocess_unterminated": 0,
     "preprocess_sha256": "b82ea8001b8f1ff0b9e827997f0832a78ef971dc253745e95da7d85f53a5ff0b",
-    "raw_diagnostic_files": 53,
-    "fixed_by_preprocess_files": 10,
     "new_diagnostic_files": 0,
-    "increased_diagnostic_files": 0
+    "fixed_by_preprocess_files": 21,
+    "increased_diagnostic_files": 0,
+    "macro_index_files": 314,
+    "macro_rewrites": 931,
+    "macro_unsupported": 33049,
+    "macro_too_long": 0,
+    "macro_sha256": "27de97fa418d3880fa86afda8b7774ea1cf84b51b302aedb680c7001ff218a47",
+    "fixed_by_macro_files": 11,
+    "new_diagnostic_by_macro_files": 0,
+    "increased_by_macro_files": 0,
+    "non_blank_lines": 206778,
+    "raw": {
+      "diagnostic_files": 53,
+      "error_lines": 850,
+      "error_nodes": 3824,
+      "total_nodes": 1854347
+    },
+    "conditional": {
+      "diagnostic_files": 43,
+      "error_lines": 766,
+      "error_nodes": 3399,
+      "total_nodes": 1827984
+    },
+    "full": {
+      "diagnostic_files": 32,
+      "error_lines": 285,
+      "error_nodes": 481,
+      "total_nodes": 1826038
+    }
   }
 }

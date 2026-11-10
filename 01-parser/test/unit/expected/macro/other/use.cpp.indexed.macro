@@ -1,0 +1,4 @@
+rewrites 1
+unsupported 1
+too_long 0
+rewrite line=3 column=7 name=LIB_EXPORT replacement="" definition=fixture/macro/other/port_def.inc:3

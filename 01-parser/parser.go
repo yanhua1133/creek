@@ -2,6 +2,7 @@ package parser
 
 import (
 	"context"
+	"time"
 
 	ts "github.com/tree-sitter/go-tree-sitter"
 )
@@ -56,37 +57,80 @@ func rawParse(ctx context.Context, content []byte, lang Language) (tree *ts.Tree
 	return tree, count, coveredBytes, nil
 }
 
-// parseView 返回指定语言实际交给 Tree-sitter 的源码：C/C++ 默认为条件编译分支选择后的视图，其余为原始源码。
-func parseView(file SourceFile, lang Language, options ParseOptions) ([]byte, *PreprocessReport) {
+// preparedView 保存一次解析实际交给 Tree-sitter 的源码及其预处理报告和耗时。
+type preparedView struct {
+	// content 是交给 Tree-sitter 的源码，与原文件等长。
+	content []byte
+	// preprocess 是条件编译分支选择报告，未做分支选择时为空。
+	preprocess *PreprocessReport
+	// macros 是宏中和报告，未做宏中和时为空。
+	macros *MacroReport
+	// metrics 记录预处理各环节耗时，只在 CollectMetrics 为真时填写。
+	metrics ParseMetrics
+}
+
+// parseView 返回指定语言实际交给 Tree-sitter 的源码：C/C++ 默认依次做条件编译分支选择和宏中和，其余为原始源码。
+func parseView(file SourceFile, lang Language, options ParseOptions) preparedView {
 	if options.RawSource || (lang != LanguageC && lang != LanguageCPP) {
-		return file.Content, nil
+		return preparedView{content: file.Content}
+	}
+	var started time.Time
+	if options.CollectMetrics {
+		started = time.Now()
 	}
 	view, report := BuildConditionalView(file.Content, lang)
-	return view, &report
+	prepared := preparedView{content: view, preprocess: &report}
+	if options.CollectMetrics {
+		prepared.metrics.Conditional = time.Since(started)
+		started = time.Now()
+	}
+	if options.ConditionalOnly {
+		return prepared
+	}
+	macroView, macroReport := BuildMacroView(view, file.Path, lang, options.Macros)
+	prepared.content = macroView
+	prepared.macros = &macroReport
+	if options.CollectMetrics {
+		prepared.metrics.Macro = time.Since(started)
+	}
+	return prepared
+}
+
+// timedParse 解析预处理后的源码，CollectMetrics 为真时把 Tree-sitter 耗时记入 metrics。
+func timedParse(ctx context.Context, prepared *preparedView, lang Language, options ParseOptions) (*ts.Tree, int, uint, error) {
+	var started time.Time
+	if options.CollectMetrics {
+		started = time.Now()
+	}
+	tree, count, coveredBytes, err := rawParse(ctx, prepared.content, lang)
+	if options.CollectMetrics {
+		prepared.metrics.TreeSitter = time.Since(started)
+	}
+	return tree, count, coveredBytes, err
 }
 
 // parseSingle 用单一 grammar 解析并包装结果。
 func (p *treeParser) parseSingle(ctx context.Context, file SourceFile, lang Language, options ParseOptions) (ParseResult, error) {
-	view, report := parseView(file, lang, options)
-	tree, _, _, err := rawParse(ctx, view, lang)
+	prepared := parseView(file, lang, options)
+	tree, _, _, err := timedParse(ctx, &prepared, lang, options)
 	if err != nil {
 		return ParseResult{}, err
 	}
-	return p.buildResult(file, lang, tree, options, nil, report), nil
+	return p.buildResult(file, lang, tree, options, nil, prepared, prepared.metrics), nil
 }
 
 // parseHeader 对 .h 头文件分别用 C 与 C++ grammar 解析，按错误节点数、错误覆盖字节、C++ 优先的固定规则择优。
 func (p *treeParser) parseHeader(ctx context.Context, file SourceFile, options ParseOptions) (ParseResult, error) {
-	cView, cReport := parseView(file, LanguageC, options)
-	cTree, cCount, cBytes, cErr := rawParse(ctx, cView, LanguageC)
+	cPrepared := parseView(file, LanguageC, options)
+	cTree, cCount, cBytes, cErr := timedParse(ctx, &cPrepared, LanguageC, options)
 	if isContextErr(cErr) {
 		if cTree != nil {
 			cTree.Close()
 		}
 		return ParseResult{}, cErr
 	}
-	cppView, cppReport := parseView(file, LanguageCPP, options)
-	cppTree, cppCount, cppBytes, cppErr := rawParse(ctx, cppView, LanguageCPP)
+	cppPrepared := parseView(file, LanguageCPP, options)
+	cppTree, cppCount, cppBytes, cppErr := timedParse(ctx, &cppPrepared, LanguageCPP, options)
 	if isContextErr(cppErr) {
 		if cTree != nil {
 			cTree.Close()
@@ -96,6 +140,11 @@ func (p *treeParser) parseHeader(ctx context.Context, file SourceFile, options P
 		}
 		return ParseResult{}, cppErr
 	}
+	metrics := ParseMetrics{
+		Conditional: cPrepared.metrics.Conditional + cppPrepared.metrics.Conditional,
+		Macro:       cPrepared.metrics.Macro + cppPrepared.metrics.Macro,
+		TreeSitter:  cPrepared.metrics.TreeSitter + cppPrepared.metrics.TreeSitter,
+	}
 	// 两次解析都系统性失败时报头文件解析失败。
 	if cErr != nil && cppErr != nil {
 		return ParseResult{}, ErrHeaderParseFailed
@@ -103,11 +152,11 @@ func (p *treeParser) parseHeader(ctx context.Context, file SourceFile, options P
 	// 其中一次系统性失败时直接采用成功的一次。
 	if cErr != nil {
 		return p.buildResult(file, LanguageCPP, cppTree, options,
-			&HeaderResolution{CPPErrorCount: cppCount, CPPErrorBytes: cppBytes, Chosen: LanguageCPP}, cppReport), nil
+			&HeaderResolution{CPPErrorCount: cppCount, CPPErrorBytes: cppBytes, Chosen: LanguageCPP}, cppPrepared, metrics), nil
 	}
 	if cppErr != nil {
 		return p.buildResult(file, LanguageC, cTree, options,
-			&HeaderResolution{CErrorCount: cCount, CErrorBytes: cBytes, Chosen: LanguageC}, cReport), nil
+			&HeaderResolution{CErrorCount: cCount, CErrorBytes: cBytes, Chosen: LanguageC}, cPrepared, metrics), nil
 	}
 	res := &HeaderResolution{
 		CErrorCount:   cCount,
@@ -119,10 +168,10 @@ func (p *treeParser) parseHeader(ctx context.Context, file SourceFile, options P
 	res.Chosen = chosen
 	if chosen == LanguageC {
 		cppTree.Close()
-		return p.buildResult(file, LanguageC, cTree, options, res, cReport), nil
+		return p.buildResult(file, LanguageC, cTree, options, res, cPrepared, metrics), nil
 	}
 	cTree.Close()
-	return p.buildResult(file, LanguageCPP, cppTree, options, res, cppReport), nil
+	return p.buildResult(file, LanguageCPP, cppTree, options, res, cppPrepared, metrics), nil
 }
 
 // chooseHeaderLanguage 按固定规则在 C 与 C++ 之间择优：错误节点数少者胜；相等则错误覆盖字节少者胜；仍相等选 C++。
@@ -142,8 +191,8 @@ func chooseHeaderLanguage(cCount, cppCount int, cBytes, cppBytes uint) Language 
 	return LanguageCPP
 }
 
-// buildResult 把选中的底层树包装为 SyntaxTree 并按需收集诊断，组装成解析结果；语法树保留原始源码供节点取文本。
-func (p *treeParser) buildResult(file SourceFile, lang Language, tree *ts.Tree, options ParseOptions, header *HeaderResolution, report *PreprocessReport) ParseResult {
+// buildResult 把选中的底层树包装为 SyntaxTree 并按需收集诊断，组装成解析结果；语法树保留原始源码供节点取文本，有宏改写时另存解析视图。
+func (p *treeParser) buildResult(file SourceFile, lang Language, tree *ts.Tree, options ParseOptions, header *HeaderResolution, prepared preparedView, metrics ParseMetrics) ParseResult {
 	st := &syntaxTree{
 		lang:    lang,
 		fileID:  file.ID,
@@ -151,17 +200,26 @@ func (p *treeParser) buildResult(file SourceFile, lang Language, tree *ts.Tree, 
 		content: file.Content,
 		tree:    tree,
 	}
+	if prepared.macros != nil && len(prepared.macros.Rewrites) > 0 {
+		st.view = prepared.content
+		st.rewrites = prepared.macros.Rewrites
+	}
 	var diags []Diagnostic
 	if options.CollectDiagnostics {
 		diags = collectDiagnostics(tree)
 	}
-	return ParseResult{
+	result := ParseResult{
 		Language:    lang,
 		Tree:        st,
 		Diagnostics: diags,
 		Header:      header,
-		Preprocess:  report,
+		Preprocess:  prepared.preprocess,
+		Macros:      prepared.macros,
 	}
+	if options.CollectMetrics {
+		result.Metrics = &metrics
+	}
+	return result
 }
 
 // isContextErr 报告错误是否由上下文取消或超时引起。
