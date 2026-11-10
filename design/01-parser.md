@@ -327,7 +327,7 @@ C/C++ 在交给 Tree-sitter 之前，先选择条件编译分支：每组 `#if`�
 - 只把字节替换为空格，换行符 `\n` 和回车符 `\r` 保留，不插入、不删除任何字节。处理前后文件长度、全部字节偏移和行列位置完全一致，诊断和节点范围直接对应原始源码。
 - 用词法扫描识别指令：只有行首（前面只有空白）的 `#` 开始一条指令，注释、字符串、字符字面量和 C++ 原始字符串（`R"分隔符(...)分隔符"`）中的 `#` 不算；反斜杠续行属于同一条指令。
 - 条件求值结果分为真、假、未知三种，只使用以下确定信息：
-  - `__cplusplus`：用 C++ grammar 解析时视为已定义、值为 `201703`，用 C grammar 解析时视为未定义。`.h` 文件的两次解析分别求值。
+  - 默认目标配置：Linux x86_64、GCC 13、C17/C++17。用 C++ grammar 解析时 `__cplusplus=201703`、`__GNUG__=13`、`__STDC_VERSION__` 未定义；用 C grammar 解析时 `__cplusplus`、`__GNUG__` 未定义、`__STDC_VERSION__=201710`。`.h` 文件的两次解析分别求值。另外定义 `__GNUC__`、`__linux__`、`__x86_64__`、`__LP64__`、字节序、类型宽度等编译器预定义宏和 `INT_MAX` 等标准头文件整数上限宏，并把 `_WIN32`、`_MSC_VER`、`__APPLE__`、`__clang__`、`__aarch64__` 等其他平台和编译器宏视为未定义。完整列表见 `preprocess.go` 的 `targetDefined` 和 `targetUndefined`。
   - 整数字面量，例如 `#if 0`、`#if 1`。
   - 本文件内、在已保留代码中先出现的 `#define` 和 `#undef`：`#define X` 后 `defined(X)` 为真，值为整数字面量时可参与比较；`#undef X` 后 `defined(X)` 为假。
   - 运算符 `defined`、`!`、`&&`、`||`、`==`、`!=`、`<`、`>`、`<=`、`>=` 和括号；其他运算符、未知标识符和无法解析的表达式求值为未知。`&&`、`||` 按短路语义处理未知，例如“假 && 未知”为假。
@@ -384,7 +384,7 @@ type PreprocessReport struct {
 
 ### 测试
 
-- 单元 fixture 覆盖：`extern "C"` 被拆到两个分支、`#if 0`、`#elif` 链、嵌套条件、按 grammar 区分的 `__cplusplus`、本文件 `#define`/`#undef` 影响求值、续行指令、注释和字符串及原始字符串中的 `#`、缺少 `#endif`、多余的 `#endif`、函数体内被丢弃的分支（验证节点文本取自原始源码）。
+- 单元 fixture 覆盖：默认目标配置（`_WIN32`、`__APPLE__`、`__linux__`、`__GNUC__`、`__clang__`）、`extern "C"` 被拆到两个分支、`#if 0`、`#elif` 链、嵌套条件、按 grammar 区分的 `__cplusplus`、本文件 `#define`/`#undef` 影响求值、续行指令、注释和字符串及原始字符串中的 `#`、缺少 `#endif`、多余的 `#endif`、函数体内被丢弃的分支（验证节点文本取自原始源码）。
 - 每个 C/C++ fixture 除语法树 golden 外，还有一份报告 golden（`.pp`），逐分支记录指令、条件、求值结果和是否保留。
 - 回归 fixture：redis 中以反斜杠续行的多行条件、protobuf 中原始字符串内以 `#` 开头的行。
 - 单元测试校验解析视图与原文件等长，且被替换的位置在原文件中不是换行符。
@@ -630,7 +630,7 @@ Parser 是分析流水线的**中间步骤**，不产出漏洞报告，因此没
 
 E2E 中含 `ERROR` 或 `MISSING` 节点的文件不是正确结果。E2E expected 锁定当前输出，只用于发现输出变化，不代表这些语法树正确。C、C++ 和 Java 仍有含语法错误的文件，未达到零错误，Parser 的 E2E 正确性验收为 ❌。
 
-当前统计（protobuf 已排除 `objectivec/`，已启用条件编译分支选择）：
+当前统计（protobuf 已排除 `objectivec/`，已启用条件编译分支选择和默认目标配置）：
 
 | 项目 | 语言 | 含 ERROR/MISSING 文件 | 按原样解析时含错文件 | 纳入文件总数 |
 |---|---|---:|---:|---:|
@@ -638,9 +638,9 @@ E2E 中含 `ERROR` 或 `MISSING` 节点的文件不是正确结果。E2E expecte
 | django | Python | 0 | 0 | 2927 |
 | junit-framework | Java | 6 | 6 | 1738 |
 | redis | C | 43 | 53 | 278 |
-| protobuf | C++ | 374 | 407 | 1095 |
+| protobuf | C++ | 372 | 407 | 1095 |
 
-条件编译分支选择使 redis 10 个、protobuf 33 个文件变为无诊断，没有任何原本无诊断的文件新增诊断。protobuf 有 3 个原本就含诊断的文件诊断条数略增：`map_entry.h` 7→8、`message.h` 77→78、`repeated_field_proxy.h` 62→65。新增诊断全部位于按原样解析时第一处错误之后，即已被注解宏（如 `PROTOBUF_FUTURE_ADD_EARLY_WARN_UNUSED`）破坏的类体内部，属于错误恢复路径变化产生的连锁诊断；注解宏中和完成后必须复查。
+条件编译分支选择使 redis 10 个、protobuf 35 个文件变为无诊断，没有任何原本无诊断的文件新增诊断。其中默认目标配置使 redis 未知条件分支 752→546、protobuf 3547→3262，protobuf 含错文件 374→372，redis 含错文件数不变。protobuf 有 3 个原本就含诊断的文件诊断条数略增：`map_entry.h` 7→8、`message.h` 77→78、`repeated_field_proxy.h` 62→65。新增诊断全部位于按原样解析时第一处错误之后，即已被注解宏（如 `PROTOBUF_FUTURE_ADD_EARLY_WARN_UNUSED`）破坏的类体内部，属于错误恢复路径变化产生的连锁诊断；注解宏中和完成后必须复查。
 
 下面的根因统计与消融实验是启用分支选择之前的数据。
 
@@ -702,6 +702,7 @@ protobuf 的 `objectivec/` 目录是 Objective-C 源码，之前未被排除，4
 
 1. 设计并实现保持字节偏移不变的轻量预处理，每一步都必须用 E2E 证明诊断减少，且原本无诊断的文件不新增诊断：
    - ✅ 条件编译分支选择，见“条件编译分支选择”。
+   - ✅ 默认目标配置（Linux x86_64、GCC 13）参与条件求值。
    - ❌ 注解宏中和，宏表限定在本文件及其包含的头文件内。
    - ❌ 常见外部宏和语句宏识别。
 2. 对剩余诊断逐条确认根因。grammar 缺陷列为已知豁免并单独统计，同时评估向上游提交修复或固定到包含修复的上游提交。
@@ -740,7 +741,7 @@ protobuf 的 `objectivec/` 目录是 Objective-C 源码，之前未被排除，4
 - ✅ 运行单元测试与 Race Detector 通过（`go test`、`go test -race`、`go vet`、`gofmt` 均通过）。
 - ✅ 单元正确性：每个 fixture 的语法树与诊断均与 golden 精确一致，故意语法错误 fixture 全部触发对应诊断，合法 fixture 无多余诊断，系统失败=0。
 - ✅ 根目录共享五个 E2E Git submodule 并记录真实 commit、Star 数和源码文件数，Parser 模块不再持有重复副本。
-- ❌ E2E 零错误：系统失败为 0，全部生成语法树，输出与 expected 一致；但 junit 6 个、redis 43 个、protobuf 374 个文件仍含语法错误，见“E2E 语法错误现状”。
+- ❌ E2E 零错误：系统失败为 0，全部生成语法树，输出与 expected 一致；但 junit 6 个、redis 43 个、protobuf 372 个文件仍含语法错误，见“E2E 语法错误现状”。
 - ✅ 纠正语料与文档：排除 protobuf `objectivec/`，更正 grammar 版本、junit 错误来源和“已排除 Objective-C”的错误说法。
 - ✅ 完成多轮资源基线 `TestE2EResourceBaseline`：普通 E2E 三轮均为全部共享源码文件成功生成语法树、系统失败=0、耗时波动=1.00x、峰值 `HeapSys=11960320` 字节；Race E2E 三轮同样全部成功、系统失败=0、耗时波动=1.00x、峰值 `HeapSys=11829248` 字节，均满足波动<3x、`HeapSys<4 GiB` 的固定退化保护。
 - ✅ 明确 `FileID` 只在同一分析任务内唯一、`Path` 为项目内相对路径的规则；`SyntaxTree` 新增 `Path()`，单元测试 `TestSyntaxTreeKeepsFileIdentity` 先失败后通过；E2E 改为传入项目内相对路径。
@@ -748,6 +749,7 @@ protobuf 的 `objectivec/` 目录是 Objective-C 源码，之前未被排除，4
 - ✅ 条件编译分支选择 E2E：redis 含错文件 53→43、protobuf 407→374，原本无诊断的文件新增诊断数为 0；Java、Go、Python 语法树摘要不变；expected 增加报告摘要和按原样解析的对照字段。
 - ✅ 合法 fixture 的诊断检查改为必须为零，删除原来“误报率低于 30%”的比例阈值。
 - ✅ 回归覆盖：`ParseCtx` 空指针缺陷由 `TestParseContextCanceled` 固定回归；解析行为层暂无其他已修复缺陷，`regression/` 目录预留。
+- ✅ 默认目标配置（Linux x86_64、GCC 13）纳入条件求值：新增 `fixture/c/positive/cond_target.c` 与手写报告 golden，去掉目标配置时 `_WIN32` 求值为未知、Windows 分支被保留，测试失败，加入后通过；E2E redis 未知条件分支 752→546、protobuf 3547→3262，protobuf 含错文件 374→372，原本无诊断的文件新增诊断为 0；Java、Go、Python 不变；`go test`、`go test -race` 单元测试通过。
 
 ### 实现与验证说明
 
