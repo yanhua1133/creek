@@ -1,0 +1,6 @@
+rewrites 0
+unsupported 0
+too_long 0
+placeholders 2
+placeholder line=2 column=16 name=MANGLE form=name text="MANGLE" defined=false
+placeholder line=4 column=16 name=MANGLE form=name text="MANGLE" defined=false

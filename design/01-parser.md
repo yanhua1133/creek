@@ -2,7 +2,7 @@
 
 ## 结论
 
-Parser 模块使用官方 Go 绑定 `github.com/tree-sitter/go-tree-sitter`，分别接入 Tree-sitter 官方维护的 C、C++、Java、Go 和 Python grammar。模块只负责源码识别、C/C++ 轻量预处理（条件编译分支选择和宏中和，均保持字节偏移不变）、语法解析、错误恢复、语法树访问和源码位置映射，不承担完整宏展开、类型推导、名称解析、common AST 或 IR 构建。
+Parser 模块使用官方 Go 绑定 `github.com/tree-sitter/go-tree-sitter`，分别接入 Tree-sitter 官方维护的 C、C++、Java、Go 和 Python grammar。模块只负责源码识别、C/C++ 轻量预处理（条件编译分支选择、宏中和和错误驱动的宏占位符，均保持字节偏移不变）、语法解析、错误恢复、语法树访问和源码位置映射，不承担完整宏展开、类型推导、名称解析、common AST 或 IR 构建。
 
 测试严格拆分为两个独立目录：
 
@@ -178,6 +178,8 @@ type ParseOptions struct {
     Macros *MacroIndex
     // CollectMetrics 指定是否记录各处理环节的耗时，默认关闭。
     CollectMetrics bool
+    // SkipPlaceholders 为真时不放置宏占位符，用于对照和排查。
+    SkipPlaceholders bool
 }
 
 // ParseResult 保存语法树和解析过程中产生的诊断。
@@ -196,6 +198,8 @@ type ParseResult struct {
     Macros *MacroReport
     // Metrics 记录各处理环节耗时，CollectMetrics 为假时为空。
     Metrics *ParseMetrics
+    // Placeholders 是最终选中语言对应的宏占位符，按源码顺序排列，与 Tree.Placeholders() 相同。
+    Placeholders []Placeholder
 }
 
 // Diagnostic 表示一个可以定位到源码范围的解析问题。
@@ -259,6 +263,8 @@ type SyntaxTree interface {
     Path() string
     // Root 返回语法树的根节点。
     Root() Node
+    // Placeholders 返回按源码顺序排列的宏占位符；落在其范围内的节点是占位结构，不是源码真实结构。
+    Placeholders() []Placeholder
     // Close 释放语法树持有的底层资源。
     Close() error
 }
@@ -513,6 +519,8 @@ type ParseMetrics struct {
     Macro time.Duration
     // TreeSitter 是 Tree-sitter 解析耗时。
     TreeSitter time.Duration
+    // Placeholder 是宏占位符查找与重新解析的耗时，不含第一次 Tree-sitter 解析。
+    Placeholder time.Duration
 }
 ```
 
@@ -530,6 +538,99 @@ type ParseMetrics struct {
 - `ParseResult.Macros` 逐条记录改写位置、宏名、写入文本、定义文件和行号，以及未改写计数，可单独验证宏中和是否正确。
 - `ParseOptions.CollectMetrics` 打开后，`ParseResult.Metrics` 分别给出分支选择、宏中和、Tree-sitter 解析的耗时；默认关闭，不影响结果和性能。
 - 实测（全量 E2E 语料，单线程）：protobuf 建索引读取 627 个宏定义文件，耗时 0.23 s；1095 个文件的分支选择共 0.30 s，宏中和 0.42 s，Tree-sitter 解析 10.67 s，宏中和约占 4%。redis 建索引 314 个文件 0.14 s；宏中和 0.13 s，Tree-sitter 解析 2.63 s。
+- 宏占位符只发生在有错误的文件上（protobuf 185 个、redis 32 个），每轮多一次完整解析。实测 protobuf 首次 Tree-sitter 解析 7.38 s、占位符 6.10 s，redis 1.27 s、0.30 s。统计错误节点时跳过不含错误的子树、错误子树节点数取自 `DescendantCount`，protobuf 占位符耗时 8.35 s→6.10 s，结果不变。
+
+### 错误驱动的宏占位符
+
+#### 结论
+
+宏中和之后仍有语法错误的文件，再对与错误直接相关的宏调用放置占位符：在宏调用原位置写入一段不超过原调用长度的合法语法，使这一处能够解析。每个占位符都记录在 `SyntaxTree.Placeholders()` 和 `ParseResult.Placeholders` 中，后续分析按范围查表即可知道此处宏未展开、语义缺失，再决定如何降级。只处理有错误的文件，只在错误减少时采纳，原本无诊断的文件不受影响。
+
+#### 候选
+
+- 函数式宏调用：名字是宏形名字（首字符为大写字母，只含大写字母、数字和下划线，至少 2 个字符），或在本文件、索引中有定义；后跟配对括号；且与某个 `ERROR`/`MISSING` 节点相关，见下文“相关”。
+- 对象式宏：名字是宏形名字，且在本文件和索引中都没有定义（外部宏）；位于注解位置，即后面紧跟标识符或 `{`，前面不是 `=`、`(`、`[`、`,`、算术、逻辑或比较运算符；且与某个错误节点相关。
+- 相关：错误节点的起点落在“宏名起点到调用之后第一个非空白字符（含）”之间，或终点落在“调用之前最后一个非空白字符到宏名起点”之间。后者对应 Tree-sitter 把宏之前的声明符一起报错的情况，例如 `char* data() EXT_LIFETIME_BOUND {` 的错误节点是 `data()`。
+- 只看错误起点而不看整个错误范围：一个 `ERROR` 节点常覆盖整个函数体，范围内的合法宏调用（如 `EXPECT_EQ(...)`）与错误无关，不应被替换；修复一处后暴露的新错误由下一轮处理。
+- 实参或范围与宏中和改写重叠的调用不是候选，保证改写范围互不重叠。
+- 已被宏中和改写的位置、成员或限定名（前有 `.`、`->`、`::`）、预处理指令内部都不是候选。
+
+#### 形态
+
+依据当前语法树确定作用域：从候选位置所在的最小节点向上查找，先遇到 `enumerator_list` 为枚举项列表作用域，先遇到 `initializer_list`、`argument_list` 为列表作用域，先遇到 `compound_statement` 为语句作用域，先遇到 `translation_unit`、`declaration_list`（命名空间、`extern "C"`）或 `field_declaration_list`（类体）为声明作用域，`ERROR` 节点跳过。
+
+| 情况 | 写入 | 形态 |
+|---|---|---|
+| 前一个记号是 `struct`、`union`、`enum`、`class`，或位于枚举项列表 | `NAME` | 名称 |
+| 外部宏，声明作用域，前一个记号是 `)`、`const`、`volatile`、`override`、`final`、`noexcept` 或普通标识符，右括号后紧跟 `{`、`;`、`=`、`,` | 全部替换为空格 | 省略 |
+| 外部宏，声明作用域，前一个非空白字符是 `;`、`{`、`}` 或位于文件开头，右括号后紧跟标识符 | 全部替换为空格 | 省略 |
+| 列表作用域，右括号后紧跟标识符、数字、字符串、字符或 `{` | `NAME(),` | 表达式 |
+| 列表作用域，其余情况 | `NAME()` | 表达式 |
+| 前一个非空白字符是 `=`、`(`、`[`、`,` 或运算符，或前一个记号是 `return`、`case` | `NAME()` | 表达式 |
+| 右括号后紧跟 `;` | `NAME()` | 表达式 |
+| 声明作用域，且右括号后紧跟 `{` | `void NAME()` | 定义 |
+| 其余函数式宏调用 | `NAME();` | 语句 |
+| 对象式外部宏 | 全部替换为空格 | 省略 |
+
+写入文本只放在调用的第一行内，放不下或与原文相同时不放置。宏名保留在语法树中，作为被调函数名或函数名；实参不进入语法树。表格按从上到下的顺序匹配。名称形态对应生成名字的宏，例如 upb 的 `typedef struct UPB_PRIVATE(upb_X) {` 写成 `typedef struct UPB_PRIVATE {`，枚举项 `UPB_PRIVATE(kX) = 32,` 写成 `UPB_PRIVATE = 32,`。声明符之后的省略形态对应 abseil 线程安全注解，例如 `int Size() const ABSL_SHARED_LOCKS_REQUIRED(mu) {`；声明之前的省略形态对应 `ABSL_DEPRECATED("msg") void f();`；只对外部宏使用，项目内有定义的宏已知不是注解，仍写成语句形态，宏名留在语法树中。列表作用域补逗号对应展开结果提供若干元素的宏，例如 Python C API 结构体初始化中的 `PyVarObject_HEAD_INIT(&PyType_Type, 0)` 后面紧跟 `"name",`，写成 `PyVarObject_HEAD_INIT(),`。例如 GoogleTest 的 `TEST(Suite, Name) {` 在命名空间作用域写成 `void TEST()`；redis 函数体内的 `TEST("name") {` 写成 `TEST();`，后面的代码块仍是普通复合语句。
+
+#### 采纳规则
+
+每轮对当前语法树的全部候选同时放置并完整重新解析，保证最终语法树等于对最终视图的完整解析。不使用 Tree-sitter 增量解析：E2E 中 protobuf 的 `repeated_field_proxy.h` 增量解析得到的树与完整解析不同，会使结果依赖放置过程。错误子树节点数严格减少、且 `ERROR`/`MISSING` 节点个数不增加时采纳本轮并进入下一轮，否则撤销本轮并停止；最多 3 轮。第二个条件防止“大错误变成多处小错误”的局部破坏被节点总数掩盖：E2E 中写错形态的 `PyVarObject_HEAD_INIT();` 曾使错误节点从 103 降到 49，诊断却从 11 条增到 20 条。`.h` 文件的 C、C++ 两次解析各自进行，再按原规则择优。
+
+#### 下游约定
+
+- 落在占位符范围内的节点不是源码真实结构：`NAME()` 调用和 `void NAME()` 函数定义都是占位。Common AST、符号表、调用图等后续模块必须查占位符表，把这些节点标为“宏未展开”，不得当作真实调用或真实函数定义；无法处理时降级，例如调用图对占位调用不建边，或只建“未知目标”边。
+- 节点文本：完全落在占位符范围内的节点返回写入的文本，例如 `void`、宏名。
+- 占位符范围始终对应原始源码，分析阶段可以据此取回宏调用原文和实参。
+
+#### 代价
+
+- 宏实参不进入语法树，其中的调用和变量引用在语法树中看不到，只能通过占位符范围取回原文。
+- “错误与宏相关”按位置判断，可能替换掉与错误无关的宏调用；采纳规则只保证文件的错误节点总数减少。
+- 每轮多一次完整解析，只发生在有错误的文件上。
+
+#### 数据结构
+
+```go
+// PlaceholderForm 表示宏占位符的语法形态。
+type PlaceholderForm uint8
+
+const (
+    // PlaceholderExpression 表示写成无参调用表达式 NAME()。
+    PlaceholderExpression PlaceholderForm = iota + 1
+    // PlaceholderStatement 表示写成无参调用语句 NAME();。
+    PlaceholderStatement
+    // PlaceholderDefinition 表示写成函数定义头 void NAME()。
+    PlaceholderDefinition
+    // PlaceholderOmitted 表示整个宏调用替换为空格。
+    PlaceholderOmitted
+    // PlaceholderName 表示写成名字 NAME，用于 struct、union、enum、class 之后生成类型名的宏。
+    PlaceholderName
+)
+
+// Placeholder 记录一处宏占位符，即一处宏未展开、语义缺失的位置。
+type Placeholder struct {
+    // Range 是被替换的宏调用在原始源码中的范围，函数式宏包含实参和右括号。
+    Range SourceRange
+    // Name 是宏名。
+    Name string
+    // Form 是占位符形态。
+    Form PlaceholderForm
+    // Text 是写入的文本，省略形态为空。
+    Text string
+    // Defined 表示是否在本文件或索引中找到宏定义；为假表示外部宏。
+    Defined bool
+}
+```
+
+`ParseOptions.SkipPlaceholders` 为真时不放置占位符，用于对照；`RawSource`、`ConditionalOnly` 为真时同样不放置。
+
+#### 测试
+
+- 单元 fixture `fixture/macro/placeholder/` 覆盖：初始化列表中提供元素的宏（回归）、`struct` 之后和枚举项位置生成名字的宏（回归，upb 的 `UPB_PRIVATE`）、声明符之后和声明之前的函数式注解宏（回归，abseil 的 `ABSL_SHARED_LOCKS_REQUIRED`、`ABSL_DEPRECATE_AND_INLINE`）、写入文本与原文相同时不放置（回归）、语句作用域中缺分号的语句宏、声明作用域的定义型宏、函数体内后跟代码块的宏、实参不合法的表达式宏、外部注解宏、错误不在宏调用上时不放置、错误与宏无关时撤销、无错误文件不放置。占位符逐条记录在宏报告 golden 中，手写。
+- 单元测试校验占位符节点文本、`SyntaxTree.Placeholders()` 与 `ParseResult.Placeholders` 一致、视图等长且只改动占位符和宏中和范围。
+- E2E 增加“宏中和但不放占位符”的解析方式作对照，expected 锁定占位符数和占位符记录 SHA-256，原本无诊断的文件新增诊断必须为 0。
 
 ### 阶段二（未实现）
 
@@ -788,15 +889,19 @@ E2E 中含 `ERROR` 或 `MISSING` 节点的文件不是正确结果；expected �
 |---|---|---|---:|---:|---:|
 | redis | C | 原样 | 53/278（19.06%） | 850/206778（0.411%） | 3824/1854347（0.206%） |
 | redis | C | 分支选择 | 43/278（15.47%） | 766/206778（0.370%） | 3399/1827984（0.186%） |
-| redis | C | 完整预处理 | 32/278（11.51%） | 285/206778（0.138%） | 481/1826038（0.026%） |
+| redis | C | 宏中和 | 32/278（11.51%） | 285/206778（0.138%） | 481/1826038（0.026%） |
+| redis | C | 完整预处理（加占位符） | 19/278（6.83%） | 60/206778（0.029%） | 175/1825049（0.010%） |
 | protobuf | C++ | 原样 | 407/1095（37.17%） | 88279/446475（19.772%） | 845280/4323402（19.551%） |
 | protobuf | C++ | 分支选择 | 372/1095（33.97%） | 18378/446475（4.116%） | 64429/3977591（1.620%） |
-| protobuf | C++ | 完整预处理 | 185/1095（16.89%） | 3124/446475（0.700%） | 19722/3951763（0.499%） |
-| junit-framework | Java | 三种方式相同 | 6/1738（0.35%） | 10/189439（0.005%） | 87/1598382（0.005%） |
-| go-git | Go | 三种方式相同 | 0/690 | 0/131697 | 0/1353223 |
-| django | Python | 三种方式相同 | 0/2927 | 0/454158 | 0/4438252 |
+| protobuf | C++ | 宏中和 | 185/1095（16.89%） | 3124/446475（0.700%） | 19722/3951763（0.499%） |
+| protobuf | C++ | 完整预处理（加占位符） | 138/1095（12.60%） | 868/446475（0.194%） | 4122/3943450（0.105%） |
+| junit-framework | Java | 四种方式相同 | 6/1738（0.35%） | 10/189439（0.005%） | 87/1598382（0.005%） |
+| go-git | Go | 四种方式相同 | 0/690 | 0/131697 | 0/1353223 |
+| django | Python | 四种方式相同 | 0/2927 | 0/454158 | 0/4438252 |
 
-完整预处理相对按原样解析和相对只做分支选择，原本无诊断却新增诊断的文件数、诊断条数增多的文件数均为 0。
+“完整预处理”中的错误减少有一部分来自宏占位符：占位符处的语法树是占位结构，不是源码真实结构，语义缺失记录在占位符表中（redis 217 处、protobuf 1823 处）。按“源码真实结构解析正确”的口径，应以“宏中和”一行为准。
+
+宏中和相对只做分支选择、占位符相对宏中和、完整预处理相对按原样解析，原本无诊断却新增诊断的文件数、诊断条数增多的文件数均为 0。
 
 #### 宏中和的动机
 
@@ -811,13 +916,15 @@ E2E 中含 `ERROR` 或 `MISSING` 节点的文件不是正确结果；expected �
 
 结论：剩余错误约三分之二来自注解宏，grammar 缺陷影响很小。全局替换会误伤同名普通标识符，因此实现改为按目录就近查找定义，见“轻量容错宏预处理”。
 
-#### 完整预处理后的剩余错误
+#### 宏中和后的剩余错误与占位符
 
-按错误位置附近的宏名估计（位置特征，未逐条证实）：
+宏中和后的剩余错误按错误位置附近的宏名估计（位置特征，未逐条证实）：
 
-- 函数式宏：约占 protobuf 剩余错误节点的 61%、redis 的 53%，例如展开为整段 `case` 的 `HANDLE_TYPE(...)`、GoogleTest 的 `TEST`/`EXPECT_*`、`PROTOBUF_DEFINE_*_ACCESSOR(...)`、redis 配置表宏 `MEMORY_CONFIG(...)`。需要阶段二的源码映射展开。
-- 定义不在语料中的外部宏：abseil 的 `ABSL_ATTRIBUTE_LIFETIME_BOUND`、`ABSL_CHECK` 等。
+- 函数式宏：约占 protobuf 剩余错误节点的 61%、redis 的 53%，例如展开为整段 `case` 的 `HANDLE_TYPE(...)`、GoogleTest 的 `TEST`/`EXPECT_*`、`PROTOBUF_DEFINE_*_ACCESSOR(...)`、redis 配置表宏 `MEMORY_CONFIG(...)`。宏占位符处理其中与错误直接相关的调用；真正展开需要阶段二的源码映射。
+- 定义不在语料中的外部宏：abseil 的 `ABSL_ATTRIBUTE_LIFETIME_BOUND`、`ABSL_CHECK` 等。注解位置的这类宏由占位符省略。
 - grammar 缺陷，见下表。
+
+占位符形态分布（E2E 抽查）：protobuf 1823 处，其中省略 917（几乎全是 abseil 注解）、表达式 476、语句 391、定义 27（全是 GoogleTest 的 `MATCHER*`）、名称 12（upb 的名字生成宏）；redis 217 处，其中语句 216（主要是测试宏 `TEST`、`TEST_DESC` 和 `run_with_period`）、表达式 1。
 
 #### 已证实的 grammar 缺陷
 
@@ -854,6 +961,7 @@ protobuf 的 `objectivec/` 目录是 Objective-C 源码，之前未被排除，4
    - ✅ 条件编译分支选择。
    - ✅ 默认目标配置（Linux x86_64、GCC 13）。
    - ✅ 注解宏中和，宏定义按目录就近查找。
+   - ✅ 错误驱动的宏占位符：使含错的宏调用可解析，并记录语义缺失位置。
    - ❌ 函数式宏和长度变化的宏展开（阶段二，需要源码映射）。
    - ❌ 语料中没有定义的外部宏（abseil、GoogleTest）：评估内置常见外部注解宏表。
 2. 对剩余诊断逐条确认根因。grammar 缺陷列为已知豁免并单独统计，同时评估向上游提交修复或固定到包含修复的上游提交。
@@ -892,7 +1000,7 @@ protobuf 的 `objectivec/` 目录是 Objective-C 源码，之前未被排除，4
 - ✅ 运行单元测试与 Race Detector 通过（`go test`、`go test -race`、`go vet`、`gofmt` 均通过）。
 - ✅ 单元正确性：每个 fixture 的语法树与诊断均与 golden 精确一致，故意语法错误 fixture 全部触发对应诊断，合法 fixture 无多余诊断，系统失败=0。
 - ✅ 根目录共享五个 E2E Git submodule 并记录真实 commit、Star 数和源码文件数，Parser 模块不再持有重复副本。
-- ❌ E2E 零错误：系统失败为 0，全部生成语法树，输出与 expected 一致；但 junit 6 个、redis 32 个、protobuf 185 个文件仍含语法错误，见“E2E 语法错误现状”。
+- ❌ E2E 零错误：系统失败为 0，全部生成语法树，输出与 expected 一致；但 junit 6 个、redis 19 个、protobuf 138 个文件仍含语法错误（宏中和后为 redis 32 个、protobuf 185 个，其余由占位符消除），见“E2E 语法错误现状”。
 - ✅ 纠正语料与文档：排除 protobuf `objectivec/`，更正 grammar 版本、junit 错误来源和“已排除 Objective-C”的错误说法。
 - ✅ 完成多轮资源基线 `TestE2EResourceBaseline`：普通 E2E 三轮均为全部共享源码文件成功生成语法树、系统失败=0、耗时波动=1.00x、峰值 `HeapSys=11960320` 字节；Race E2E 三轮同样全部成功、系统失败=0、耗时波动=1.00x、峰值 `HeapSys=11829248` 字节，均满足波动<3x、`HeapSys<4 GiB` 的固定退化保护。
 - ✅ 明确 `FileID` 只在同一分析任务内唯一、`Path` 为项目内相对路径的规则；`SyntaxTree` 新增 `Path()`，单元测试 `TestSyntaxTreeKeepsFileIdentity` 先失败后通过；E2E 改为传入项目内相对路径。
@@ -910,6 +1018,10 @@ protobuf 的 `objectivec/` 目录是 Objective-C 源码，之前未被排除，4
 - ✅ 节点文本：复查发现宏改写生成的关键字节点 `Text` 返回截断的宏名（如 `LIB_IN`），改为完全落在改写范围内的节点返回写入的关键字；`TestMacroRewrittenNodeText` 先失败后通过；E2E 只有 redis、protobuf 的语法树摘要变化，其余计数与摘要不变。
 - ✅ 宏中和后的项目级验证：`go build`、`go vet`、`gofmt`、Parser 与 Common AST 单元测试、`go test -race` 单元测试、Parser 与 Common AST E2E、Parser 资源基线 E2E、`go test -race -tags=e2e ./01-parser/test/e2e/` 全部通过。
 - ✅ 回归：E2E 比较“诊断是否增多”误用了每个文件的含错标记（只有 0 或 1），该项检查从未生效；改为比较诊断条数，expected 增加三种解析方式的诊断总条数（protobuf 25768、18699、2812）。修正后诊断增多的文件数仍为 0。
+- ✅ 错误驱动的宏占位符设计：候选、形态、采纳规则、下游约定、代价、数据结构和测试方案，见“错误驱动的宏占位符”。
+- ✅ 宏占位符 fixture、手写 golden 与失败测试：`fixture/macro/placeholder/` 共 12 个文件，占位符记录 golden 全部手写；未实现时 `TestPlaceholderFixesErrors`、`TestPlaceholderNodeText` 和快照测试失败。
+- ✅ 宏占位符实现（`placeholder.go`），单元测试与 Race Detector 通过。E2E 抽查发现并以回归 fixture 固定 5 类形态缺陷，每个先失败后通过：初始化列表中的元素宏被写成语句（`initializer_list.c`）、`struct` 之后的名字宏被写成定义（`struct_name.c`）、枚举项名字宏被写成语句（`enum_name.c`）、声明符之后的注解宏被写成定义（`lock_annotation.cpp`）、声明之前的注解宏被写成语句或写入与原文相同的文本（`decl_annotation.cpp`）；采纳条件增加“错误节点个数不增加”。
+- ✅ 宏占位符 E2E：redis 含错文件 32→19、节点错误率 0.026%→0.010%，protobuf 185→138、0.499%→0.105%；占位符 redis 217 处、protobuf 1823 处；原本无诊断的文件新增诊断和诊断增多的文件均为 0；Java、Go、Python 摘要不变；资源基线三轮通过（耗时波动 1.06x，峰值 `HeapSys=37158912` 字节）。Common AST E2E 随之更新 expected。
 
 ### 实现与验证说明
 

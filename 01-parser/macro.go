@@ -97,6 +97,8 @@ type ParseMetrics struct {
 	Macro time.Duration
 	// TreeSitter 是 Tree-sitter 解析耗时。
 	TreeSitter time.Duration
+	// Placeholder 是宏占位符查找与重新解析的耗时，不含第一次 Tree-sitter 解析。
+	Placeholder time.Duration
 }
 
 // maxMacroDepth 是宏递归展开的最大深度。
@@ -348,6 +350,13 @@ func ppTokenize(text string) []ppToken {
 
 // BuildMacroView 在条件编译视图上做宏中和，返回与原文件等长的解析视图和报告；index 可以为空，此时只使用本文件内的定义。
 func BuildMacroView(view []byte, filePath string, lang Language, index *MacroIndex) ([]byte, MacroReport) {
+	r := newMacroRewriter(view, filePath, lang, index)
+	r.scan(func(start, end, prev int) int { return r.identifier(start, end) })
+	return r.out, r.report
+}
+
+// newMacroRewriter 为视图 view 创建扫描器，输出视图初始为输入的副本。
+func newMacroRewriter(view []byte, filePath string, lang Language, index *MacroIndex) *macroRewriter {
 	r := &macroRewriter{
 		in:         view,
 		out:        append([]byte(nil), view...),
@@ -365,8 +374,7 @@ func BuildMacroView(view []byte, filePath string, lang Language, index *MacroInd
 			r.lineStarts = append(r.lineStarts, i+1)
 		}
 	}
-	r.run()
-	return r.out, r.report
+	return r
 }
 
 // macroRewriter 按词法扫描条件编译视图，识别可中和的宏调用并原位改写。
@@ -395,8 +403,9 @@ type macroRewriter struct {
 	report MacroReport
 }
 
-// run 从头到尾扫描视图：处理行首指令以维护本文件宏表，对代码中的标识符尝试宏中和。
-func (r *macroRewriter) run() {
+// scan 从头到尾扫描视图：处理行首指令以维护本文件宏表，对代码中非成员、非限定名的标识符调用 handle。
+// handle 的参数是标识符起止偏移和前一个记号的起始偏移（没有时为 -1），返回值大于 end 时表示已改写到该偏移。
+func (r *macroRewriter) scan(handle func(start, end, prev int) int) {
 	content := r.in
 	n := len(content)
 	cpp := r.lang == LanguageCPP
@@ -428,7 +437,7 @@ func (r *macroRewriter) run() {
 			continue
 		}
 		if isIdentStart(c) && !strings.ContainsAny(string(content[i:end]), "\"'") && !r.qualified(prev, prevPrev, end) {
-			if next := r.identifier(i, end); next > end {
+			if next := handle(i, end, prev); next > end {
 				prev, prevPrev = next-1, -1
 				i = next
 				continue

@@ -1,0 +1,5 @@
+rewrites 0
+unsupported 0
+too_long 0
+placeholders 1
+placeholder line=4 column=5 name=HEAD_INIT form=expression text="HEAD_INIT()," defined=false

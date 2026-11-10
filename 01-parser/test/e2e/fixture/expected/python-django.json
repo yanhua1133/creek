@@ -1,5 +1,5 @@
 {
-  "test_purpose": "全量解析 Django 的 Python 与类型桩源码，验证全部文件生成无诊断语法树，并锁定完整 CST；同时锁定按原样、只做分支选择、完整预处理（分支选择加宏中和，宏定义索引取自项目全部受跟踪的宏定义文件，含排除目录）三种解析方式的含错文件数、错误行数、错误节点数，以及宏中和报告摘要；预处理使原本无诊断的文件新增诊断的两项计数必须为 0",
+  "test_purpose": "全量解析 Django 的 Python 与类型桩源码，验证全部文件生成无诊断语法树，并锁定完整 CST；同时锁定按原样、只做分支选择、宏中和（不放占位符，宏定义索引取自项目全部受跟踪的宏定义文件，含排除目录）、完整预处理（再放置宏占位符）四种解析方式的含错文件数、诊断条数、错误行数、错误节点数，以及宏中和报告与宏占位符摘要；预处理使原本无诊断的文件新增诊断的三项计数必须为 0",
   "project_id": "python-django",
   "assertions": {
     "source_files": 2927,
@@ -27,6 +27,11 @@
     "fixed_by_macro_files": 0,
     "new_diagnostic_by_macro_files": 0,
     "increased_by_macro_files": 0,
+    "placeholders": 0,
+    "placeholder_sha256": "b485ae9cc101fb7bfc3212d0c9b7177e8284070ab260e0454cb986d367303465",
+    "fixed_by_placeholder_files": 0,
+    "new_diagnostic_by_placeholder_files": 0,
+    "increased_by_placeholder_files": 0,
     "non_blank_lines": 454158,
     "raw": {
       "diagnostic_files": 0,
@@ -36,6 +41,13 @@
       "total_nodes": 4438252
     },
     "conditional": {
+      "diagnostic_files": 0,
+      "diagnostics": 0,
+      "error_lines": 0,
+      "error_nodes": 0,
+      "total_nodes": 4438252
+    },
+    "neutralized": {
       "diagnostic_files": 0,
       "diagnostics": 0,
       "error_lines": 0,

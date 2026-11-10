@@ -1,0 +1,5 @@
+rewrites 0
+unsupported 0
+too_long 0
+placeholders 1
+placeholder line=3 column=1 name=TEST_CASE form=definition text="void TEST_CASE()" defined=false

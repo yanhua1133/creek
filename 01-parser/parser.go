@@ -2,6 +2,7 @@ package parser
 
 import (
 	"context"
+	"sort"
 	"time"
 
 	ts "github.com/tree-sitter/go-tree-sitter"
@@ -67,6 +68,23 @@ type preparedView struct {
 	macros *MacroReport
 	// metrics 记录预处理各环节耗时，只在 CollectMetrics 为真时填写。
 	metrics ParseMetrics
+	// placeholders 是已采纳的宏占位符，按源码顺序排列。
+	placeholders []Placeholder
+}
+
+// rewritten 返回宏中和改写与宏占位符的范围，按源码顺序排列且互不重叠。
+func (p *preparedView) rewritten() []SourceRange {
+	var ranges []SourceRange
+	if p.macros != nil {
+		for _, rewrite := range p.macros.Rewrites {
+			ranges = append(ranges, rewrite.Range)
+		}
+	}
+	for _, placeholder := range p.placeholders {
+		ranges = append(ranges, placeholder.Range)
+	}
+	sort.Slice(ranges, func(i, j int) bool { return ranges[i].StartByte < ranges[j].StartByte })
+	return ranges
 }
 
 // parseView 返回指定语言实际交给 Tree-sitter 的源码：C/C++ 默认依次做条件编译分支选择和宏中和，其余为原始源码。
@@ -96,8 +114,9 @@ func parseView(file SourceFile, lang Language, options ParseOptions) preparedVie
 	return prepared
 }
 
-// timedParse 解析预处理后的源码，CollectMetrics 为真时把 Tree-sitter 耗时记入 metrics。
-func timedParse(ctx context.Context, prepared *preparedView, lang Language, options ParseOptions) (*ts.Tree, int, uint, error) {
+// timedParse 解析预处理后的源码并按需放置宏占位符，CollectMetrics 为真时把 Tree-sitter 首次解析耗时记入 metrics。
+// 返回的错误节点数和错误覆盖字节数对应放置占位符后的最终语法树。
+func timedParse(ctx context.Context, prepared *preparedView, filePath string, lang Language, options ParseOptions) (*ts.Tree, int, uint, error) {
 	var started time.Time
 	if options.CollectMetrics {
 		started = time.Now()
@@ -106,13 +125,21 @@ func timedParse(ctx context.Context, prepared *preparedView, lang Language, opti
 	if options.CollectMetrics {
 		prepared.metrics.TreeSitter = time.Since(started)
 	}
-	return tree, count, coveredBytes, err
+	if err != nil || count == 0 {
+		return tree, count, coveredBytes, err
+	}
+	tree, err = placeholderRounds(ctx, tree, prepared, filePath, lang, options)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	count, coveredBytes = errorStats(tree)
+	return tree, count, coveredBytes, nil
 }
 
 // parseSingle 用单一 grammar 解析并包装结果。
 func (p *treeParser) parseSingle(ctx context.Context, file SourceFile, lang Language, options ParseOptions) (ParseResult, error) {
 	prepared := parseView(file, lang, options)
-	tree, _, _, err := timedParse(ctx, &prepared, lang, options)
+	tree, _, _, err := timedParse(ctx, &prepared, file.Path, lang, options)
 	if err != nil {
 		return ParseResult{}, err
 	}
@@ -122,7 +149,7 @@ func (p *treeParser) parseSingle(ctx context.Context, file SourceFile, lang Lang
 // parseHeader 对 .h 头文件分别用 C 与 C++ grammar 解析，按错误节点数、错误覆盖字节、C++ 优先的固定规则择优。
 func (p *treeParser) parseHeader(ctx context.Context, file SourceFile, options ParseOptions) (ParseResult, error) {
 	cPrepared := parseView(file, LanguageC, options)
-	cTree, cCount, cBytes, cErr := timedParse(ctx, &cPrepared, LanguageC, options)
+	cTree, cCount, cBytes, cErr := timedParse(ctx, &cPrepared, file.Path, LanguageC, options)
 	if isContextErr(cErr) {
 		if cTree != nil {
 			cTree.Close()
@@ -130,7 +157,7 @@ func (p *treeParser) parseHeader(ctx context.Context, file SourceFile, options P
 		return ParseResult{}, cErr
 	}
 	cppPrepared := parseView(file, LanguageCPP, options)
-	cppTree, cppCount, cppBytes, cppErr := timedParse(ctx, &cppPrepared, LanguageCPP, options)
+	cppTree, cppCount, cppBytes, cppErr := timedParse(ctx, &cppPrepared, file.Path, LanguageCPP, options)
 	if isContextErr(cppErr) {
 		if cTree != nil {
 			cTree.Close()
@@ -144,6 +171,7 @@ func (p *treeParser) parseHeader(ctx context.Context, file SourceFile, options P
 		Conditional: cPrepared.metrics.Conditional + cppPrepared.metrics.Conditional,
 		Macro:       cPrepared.metrics.Macro + cppPrepared.metrics.Macro,
 		TreeSitter:  cPrepared.metrics.TreeSitter + cppPrepared.metrics.TreeSitter,
+		Placeholder: cPrepared.metrics.Placeholder + cppPrepared.metrics.Placeholder,
 	}
 	// 两次解析都系统性失败时报头文件解析失败。
 	if cErr != nil && cppErr != nil {
@@ -200,21 +228,23 @@ func (p *treeParser) buildResult(file SourceFile, lang Language, tree *ts.Tree, 
 		content: file.Content,
 		tree:    tree,
 	}
-	if prepared.macros != nil && len(prepared.macros.Rewrites) > 0 {
+	if rewritten := prepared.rewritten(); len(rewritten) > 0 {
 		st.view = prepared.content
-		st.rewrites = prepared.macros.Rewrites
+		st.rewritten = rewritten
 	}
+	st.placeholders = prepared.placeholders
 	var diags []Diagnostic
 	if options.CollectDiagnostics {
 		diags = collectDiagnostics(tree)
 	}
 	result := ParseResult{
-		Language:    lang,
-		Tree:        st,
-		Diagnostics: diags,
-		Header:      header,
-		Preprocess:  prepared.preprocess,
-		Macros:      prepared.macros,
+		Language:     lang,
+		Tree:         st,
+		Diagnostics:  diags,
+		Header:       header,
+		Preprocess:   prepared.preprocess,
+		Macros:       prepared.macros,
+		Placeholders: prepared.placeholders,
 	}
 	if options.CollectMetrics {
 		result.Metrics = &metrics

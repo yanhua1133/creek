@@ -62,9 +62,9 @@ func TestE2EParseProjects(t *testing.T) {
 			index, indexFiles := buildProjectMacroIndex(t, repositoryRoot, project)
 			metrics := parseAll(t, parserInstance, repositoryDirectory, files, index)
 			metrics.Assertions.MacroIndexFiles = indexFiles
-			if metrics.Assertions.NewDiagnosticFiles != 0 || metrics.Assertions.NewDiagnosticByMacroFiles != 0 {
-				t.Errorf("预处理使原本无诊断的文件新增诊断: 相对原样=%d 相对分支选择=%d",
-					metrics.Assertions.NewDiagnosticFiles, metrics.Assertions.NewDiagnosticByMacroFiles)
+			if metrics.Assertions.NewDiagnosticFiles != 0 || metrics.Assertions.NewDiagnosticByMacroFiles != 0 || metrics.Assertions.NewDiagnosticByPlaceholderFiles != 0 {
+				t.Errorf("预处理使原本无诊断的文件新增诊断: 相对原样=%d 宏中和相对分支选择=%d 占位符相对宏中和=%d",
+					metrics.Assertions.NewDiagnosticFiles, metrics.Assertions.NewDiagnosticByMacroFiles, metrics.Assertions.NewDiagnosticByPlaceholderFiles)
 			}
 			logErrorRates(t, metrics.Assertions)
 			assertParserExpected(t, project, expected, metrics.Assertions)
@@ -83,6 +83,7 @@ func parseAll(t *testing.T, parserInstance parser.Parser, repositoryDirectory st
 	diagnosticHasher := sha256.New()
 	preprocessHasher := sha256.New()
 	macroHasher := sha256.New()
+	placeholderHasher := sha256.New()
 	metrics := projectMetrics{Assertions: parserAssertions{
 		SourceFiles:                len(files),
 		DiagnosticFilesByExtension: map[string]int{},
@@ -103,6 +104,7 @@ func parseAll(t *testing.T, parserInstance parser.Parser, repositoryDirectory st
 		writeHashString(diagnosticHasher, relative)
 		writeHashString(preprocessHasher, relative)
 		writeHashString(macroHasher, relative)
+		writeHashString(placeholderHasher, relative)
 		blank := blankLines(content)
 		for _, isBlank := range blank {
 			if !isBlank {
@@ -115,6 +117,8 @@ func parseAll(t *testing.T, parserInstance parser.Parser, repositoryDirectory st
 		addPreprocessMetrics(&metrics.Assertions, full.report)
 		hashMacroReport(macroHasher, full.macros)
 		addMacroMetrics(&metrics.Assertions, full.macros)
+		hashPlaceholders(placeholderHasher, full.placeholders)
+		metrics.Assertions.Placeholders += len(full.placeholders)
 		if full.elapsed > metrics.MaxFileElapsed {
 			metrics.MaxFileElapsed = full.elapsed
 		}
@@ -123,18 +127,22 @@ func parseAll(t *testing.T, parserInstance parser.Parser, repositoryDirectory st
 			continue
 		}
 		metrics.Assertions.SuccessfulTrees++
-		raw, conditional := full.stats, full.stats
+		raw, conditional, neutralized := full.stats, full.stats, full.stats
 		if full.report != nil {
 			raw = parseErrorStats(t, parserInstance, file, blank, parser.ParseOptions{CollectDiagnostics: true, RawSource: true})
 			conditional = parseErrorStats(t, parserInstance, file, blank, parser.ParseOptions{CollectDiagnostics: true, ConditionalOnly: true})
+			neutralized = parseErrorStats(t, parserInstance, file, blank, parser.ParseOptions{CollectDiagnostics: true, Macros: index, SkipPlaceholders: true})
 		}
 		addErrorStats(&metrics.Assertions.Raw, raw)
 		addErrorStats(&metrics.Assertions.Conditional, conditional)
+		addErrorStats(&metrics.Assertions.Neutralized, neutralized)
 		addErrorStats(&metrics.Assertions.Full, full.stats)
 		compareDiagnostics(t, relative, raw.Diagnostics, full.stats.Diagnostics,
 			&metrics.Assertions.FixedByPreprocessFiles, &metrics.Assertions.NewDiagnosticFiles, &metrics.Assertions.IncreasedDiagnosticFiles, "预处理")
-		compareDiagnostics(t, relative, conditional.Diagnostics, full.stats.Diagnostics,
+		compareDiagnostics(t, relative, conditional.Diagnostics, neutralized.Diagnostics,
 			&metrics.Assertions.FixedByMacroFiles, &metrics.Assertions.NewDiagnosticByMacroFiles, &metrics.Assertions.IncreasedByMacroFiles, "宏中和")
+		compareDiagnostics(t, relative, neutralized.Diagnostics, full.stats.Diagnostics,
+			&metrics.Assertions.FixedByPlaceholderFiles, &metrics.Assertions.NewDiagnosticByPlaceholderFiles, &metrics.Assertions.IncreasedByPlaceholderFiles, "宏占位符")
 		if full.stats.DiagnosticFiles != 0 {
 			metrics.Assertions.DiagnosticFiles++
 			metrics.Assertions.DiagnosticFilesByExtension[strings.ToLower(filepath.Ext(path))]++
@@ -145,6 +153,7 @@ func parseAll(t *testing.T, parserInstance parser.Parser, repositoryDirectory st
 	metrics.Assertions.DiagnosticsSHA256 = hex.EncodeToString(diagnosticHasher.Sum(nil))
 	metrics.Assertions.PreprocessSHA256 = hex.EncodeToString(preprocessHasher.Sum(nil))
 	metrics.Assertions.MacroSHA256 = hex.EncodeToString(macroHasher.Sum(nil))
+	metrics.Assertions.PlaceholderSHA256 = hex.EncodeToString(placeholderHasher.Sum(nil))
 	return metrics
 }
 
@@ -193,7 +202,7 @@ func logErrorRates(t *testing.T, assertions parserAssertions) {
 		name string
 		// stats 是该方式的错误规模。
 		stats errorStats
-	}{{"原样", assertions.Raw}, {"分支选择", assertions.Conditional}, {"完整预处理", assertions.Full}} {
+	}{{"原样", assertions.Raw}, {"分支选择", assertions.Conditional}, {"宏中和", assertions.Neutralized}, {"完整预处理", assertions.Full}} {
 		t.Logf("错误率 %s: 文件=%d/%d(%.2f%%) 行=%d/%d(%.3f%%) 节点=%d/%d(%.3f%%)", mode.name,
 			mode.stats.DiagnosticFiles, assertions.SourceFiles, percent(mode.stats.DiagnosticFiles, assertions.SourceFiles),
 			mode.stats.ErrorLines, assertions.NonBlankLines, percent(mode.stats.ErrorLines, assertions.NonBlankLines),
@@ -364,6 +373,15 @@ func hashMacroReport(hasher hash.Hash, report *parser.MacroReport) {
 	}
 }
 
+// hashPlaceholders 按固定字段顺序写入单个文件的宏占位符。
+func hashPlaceholders(hasher hash.Hash, placeholders []parser.Placeholder) {
+	writeHashString(hasher, fmt.Sprintf("placeholders:%d", len(placeholders)))
+	for _, placeholder := range placeholders {
+		writeHashString(hasher, fmt.Sprintf("%d|%d|%s|%d|%s|%t", placeholder.Range.StartByte, placeholder.Range.EndByte,
+			placeholder.Name, placeholder.Form, placeholder.Text, placeholder.Defined))
+	}
+}
+
 // fullParse 是单个文件按默认方式完整预处理后解析的结果。
 type fullParse struct {
 	// success 表示是否成功生成并完整访问了语法树。
@@ -374,6 +392,8 @@ type fullParse struct {
 	report *parser.PreprocessReport
 	// macros 是宏中和报告，非 C/C++ 文件为空。
 	macros *parser.MacroReport
+	// placeholders 是采纳的宏占位符。
+	placeholders []parser.Placeholder
 	// elapsed 是解析耗时。
 	elapsed time.Duration
 }
@@ -393,7 +413,7 @@ func parseAndHashOne(parserInstance parser.Parser, file parser.SourceFile, index
 		return out
 	}
 	defer result.Tree.Close()
-	out.report, out.macros = result.Preprocess, result.Macros
+	out.report, out.macros, out.placeholders = result.Preprocess, result.Macros, result.Placeholders
 	if err := hashSyntaxNode(treeHasher, result.Tree.Root()); err != nil {
 		writeHashString(treeHasher, "语法树访问失败:"+err.Error())
 		return out

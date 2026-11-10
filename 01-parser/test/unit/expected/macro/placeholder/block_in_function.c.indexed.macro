@@ -1,0 +1,5 @@
+rewrites 0
+unsupported 1
+too_long 0
+placeholders 1
+placeholder line=5 column=3 name=RUN_CASE form=statement text="RUN_CASE();" defined=true

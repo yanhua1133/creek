@@ -441,8 +441,8 @@ Common AST 是分析流水线的**中间步骤**，不产出漏洞报告，因�
 
 | 语言 | 项目 | 源码文件 | AST 成功 | AST 诊断文件 | 未映射节点 | 系统失败 | 耗时 |
 |---|---|---:|---:|---:|---:|---:|---:|
-| C | `redis/redis` | 278 | 278 | 21 | 0 | 0 | 5.90s |
-| C++ | `protocolbuffers/protobuf` | 1095 | 1095 | 328 | 0 | 0 | 16.95s |
+| C | `redis/redis` | 278 | 278 | 19 | 0 | 0 | 5.90s |
+| C++ | `protocolbuffers/protobuf` | 1095 | 1095 | 241 | 0 | 0 | 16.95s |
 | Java | `junit-team/junit-framework` | 1738 | 1738 | 6 | 0 | 0 | 4.75s |
 | Go | `go-git/go-git` | 690 | 690 | 0 | 0 | 0 | 4.14s |
 | Python | `django/django` | 2927 | 2927 | 0 | 0 | 0 | 14.75s |
@@ -450,10 +450,11 @@ Common AST 是分析流水线的**中间步骤**，不产出漏洞报告，因�
 - Parser 默认对 C/C++ 做条件编译分支选择，条件编译指令和未保留分支不进入 CST，因此 Common AST 中不再出现“条件编译”语言扩展节点；只有调用方设置 `RawSource` 时才会出现。条件编译信息由 Parser 的 `ParseResult.Preprocess` 报告提供。分支选择使 redis AST 诊断文件 33→25、protobuf 331→329。
 - 2026-11-10 Parser 增加默认目标配置（Linux x86_64、GCC 13）：protobuf Parser 诊断文件 374→372、AST 诊断文件 329→328，redis 只有快照摘要变化；未映射节点和系统失败仍为 0。表中 AST 诊断文件为更新后的值，耗时列仍为 2026-11-02 数据。
 - 2026-11-10 Parser 增加宏中和。Common AST E2E 不传宏定义索引，只有本文件内的宏定义参与中和：redis Parser 诊断文件 43→38、AST 诊断文件 25→21，protobuf 不变；宏改写生成的关键字节点（如 `static`）的 `Text` 返回关键字，两个项目的 Common AST 快照摘要随之变化；未映射节点和系统失败仍为 0。
+- 2026-11-10 Parser 增加错误驱动的宏占位符：redis Parser 诊断文件 38→21、AST 诊断文件 21→19，protobuf 372→277、328→241；未映射节点和系统失败仍为 0。占位符生成的 `NAME()` 调用和 `void NAME()` 函数定义目前按普通调用和函数定义转换，Common AST 尚未读取 `SyntaxTree.Placeholders()` 标记“宏未展开”，见实施进度。
 
 - 五个共享 submodule 共验证 6728 个源码文件，全部生成 `File` 根节点。protobuf 已排除 Objective-C 目录 `objectivec/`，其中 33 个文件原本带 AST 诊断。
 - 未映射语法节点为 0，系统失败为 0；AST 诊断均来自上游 CST 的 `ERROR`、`MISSING` 节点，不包含未映射诊断。
-- AST 诊断文件不是正确结果：Common AST 只是如实转换了上游错误恢复产生的结构。redis 21 个、protobuf 328 个、junit 6 个文件的 AST 含错误结构，未达到零错误，根因和消除计划见 `design/01-parser.md`“E2E 语法错误现状”。
+- AST 诊断文件不是正确结果：Common AST 只是如实转换了上游错误恢复产生的结构。redis 19 个、protobuf 241 个、junit 6 个文件的 AST 含错误结构，未达到零错误，根因和消除计划见 `design/01-parser.md`“E2E 语法错误现状”。
 - 五种语言规范化 golden 快照全部精确一致；结构化 JSON 快照确定性测试通过。
 - 总耗时 46.49s，包含为 6728 棵 Common AST 生成稳定 JSON 并计算项目级 SHA-256，仅作为当前环境顺序执行基线，不作为跨机器固定性能承诺。
 
@@ -471,8 +472,10 @@ Common AST 是分析流水线的**中间步骤**，不产出漏洞报告，因�
 - ✅ 实现按需计时、累计内存分配、处理量指标和 Go 运行时跟踪区域。
 - ✅ 单元测试、Race Detector、`go vet`、Parser 回归和五语言 E2E 全部通过。
 - ✅ 五语言 golden 正报 5/5，真实源码转换 6728/6728，系统失败 0，未映射节点 0。
-- ❌ E2E 零错误：redis 21 个、protobuf 328 个、junit 6 个文件的 AST 含上游 CST 错误恢复产生的错误结构，依赖 Parser 消除。
+- ❌ E2E 零错误：redis 19 个、protobuf 241 个、junit 6 个文件的 AST 含上游 CST 错误恢复产生的错误结构，依赖 Parser 消除。
 - ✅ 随 Parser 默认目标配置更新 redis、protobuf expected：只有 Parser 诊断文件数、AST 诊断文件数和摘要变化，未映射节点 0、系统失败 0；Java、Go、Python expected 不变。
 - ✅ 随 Parser 宏中和更新 redis、protobuf expected：redis Parser 诊断文件 43→38、AST 诊断文件 25→21，两个项目只有计数和摘要变化，未映射节点 0、系统失败 0；Java、Go、Python expected 不变。
+- ✅ 随 Parser 宏占位符更新 redis、protobuf expected：只有诊断文件数和摘要变化，未映射节点 0、系统失败 0；Java、Go、Python expected 不变。
+- ❌ 读取 `SyntaxTree.Placeholders()`，把占位符范围内的节点标为“宏未展开”，不当作真实调用或真实函数定义。
 - ✅ E2E 改为读取根目录单份共享语料；五个项目 expected 分别锁定测试目的、逐项指标、完整 Common AST SHA-256 和诊断 SHA-256。
 - ✅ `CommonAST` 新增 `Path()`，快照用 `path` 代替 `file_id`；`TestCommonASTKeepsFileIdentity` 与回归测试 `TestSnapshotIndependentOfFileID` 先失败后通过；单元 golden 与五个项目快照 SHA-256 更新，其余 expected 字段不变；把快照字段临时改回 `file_id` 时旧 SHA-256 全部复现，证明 AST 结构未变。

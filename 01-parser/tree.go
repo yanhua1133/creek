@@ -21,8 +21,10 @@ type syntaxTree struct {
 	content []byte
 	// view 是实际交给 Tree-sitter 的解析视图，与 content 等长，只用于取宏改写范围内的节点文本。
 	view []byte
-	// rewrites 是按源码顺序排列、互不重叠的宏改写，完全落在其中的节点取 view 中的文本。
-	rewrites []MacroRewrite
+	// rewritten 是按源码顺序排列、互不重叠的宏中和改写与宏占位符范围，完全落在其中的节点取 view 中的文本。
+	rewritten []SourceRange
+	// placeholders 是按源码顺序排列的宏占位符。
+	placeholders []Placeholder
 	// tree 是底层 Tree-sitter 树，关闭后置为 nil。
 	tree *ts.Tree
 	// closed 标记该语法树是否已关闭。
@@ -54,6 +56,11 @@ func (t *syntaxTree) Root() Node {
 	return &node{owner: t, raw: t.tree.RootNode()}
 }
 
+// Placeholders 返回按源码顺序排列的宏占位符。
+func (t *syntaxTree) Placeholders() []Placeholder {
+	return t.placeholders
+}
+
 // Close 释放底层树资源，重复调用安全并返回稳定结果。
 func (t *syntaxTree) Close() error {
 	t.mu.Lock()
@@ -69,10 +76,10 @@ func (t *syntaxTree) Close() error {
 	return nil
 }
 
-// textSource 返回节点 [start,end) 取文本所用的字节：完全落在一次宏改写范围内时为解析视图，否则为原始源码。
+// textSource 返回节点 [start,end) 取文本所用的字节：完全落在一次宏改写或占位符范围内时为解析视图，否则为原始源码。
 func (t *syntaxTree) textSource(start, end uint) []byte {
-	i := sort.Search(len(t.rewrites), func(i int) bool { return t.rewrites[i].Range.StartByte > start }) - 1
-	if i >= 0 && end <= t.rewrites[i].Range.EndByte && len(t.view) == len(t.content) {
+	i := sort.Search(len(t.rewritten), func(i int) bool { return t.rewritten[i].StartByte > start }) - 1
+	if i >= 0 && end <= t.rewritten[i].EndByte && len(t.view) == len(t.content) {
 		return t.view
 	}
 	return t.content

@@ -1,0 +1,6 @@
+rewrites 0
+unsupported 0
+too_long 0
+placeholders 2
+placeholder line=5 column=7 name=EXT_LOCKS_REQUIRED form=omitted text="" defined=false
+placeholder line=9 column=16 name=EXT_LOCKS_EXCLUDED form=omitted text="" defined=false

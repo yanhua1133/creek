@@ -24,6 +24,8 @@ type ParseOptions struct {
 	Macros *MacroIndex
 	// CollectMetrics 指定是否记录各处理环节的耗时，默认关闭。
 	CollectMetrics bool
+	// SkipPlaceholders 为真时不放置宏占位符，用于对照和排查。
+	SkipPlaceholders bool
 }
 
 // DiagnosticKind 表示解析诊断问题的类型。
@@ -78,6 +80,8 @@ type ParseResult struct {
 	Macros *MacroReport
 	// Metrics 记录各处理环节耗时，CollectMetrics 为假时为空。
 	Metrics *ParseMetrics
+	// Placeholders 是最终选中语言对应的宏占位符，按源码顺序排列，与 Tree.Placeholders() 相同。
+	Placeholders []Placeholder
 }
 
 // Parser 定义单个源码文件的解析能力。
@@ -97,6 +101,8 @@ type SyntaxTree interface {
 	Path() string
 	// Root 返回语法树的根节点。
 	Root() Node
+	// Placeholders 返回按源码顺序排列的宏占位符；落在其范围内的节点是占位结构，不是源码真实结构。
+	Placeholders() []Placeholder
 	// Close 释放语法树持有的底层资源，重复调用安全且返回稳定结果。
 	Close() error
 }
