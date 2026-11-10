@@ -66,19 +66,31 @@ type parserAssertions struct {
 	MacroTooLong int `json:"macro_too_long"`
 	// MacroSHA256 是全部宏中和报告的稳定摘要。
 	MacroSHA256 string `json:"macro_sha256"`
-	// FixedByMacroFiles 是只做分支选择时含诊断、宏中和后不含诊断的文件数。
+	// FixedByMacroFiles 是只做分支选择时含诊断、宏中和（不放占位符）后不含诊断的文件数。
 	FixedByMacroFiles int `json:"fixed_by_macro_files"`
-	// NewDiagnosticByMacroFiles 是只做分支选择时不含诊断、宏中和后反而含诊断的文件数，必须为零。
+	// NewDiagnosticByMacroFiles 是只做分支选择时不含诊断、宏中和（不放占位符）后反而含诊断的文件数，必须为零。
 	NewDiagnosticByMacroFiles int `json:"new_diagnostic_by_macro_files"`
-	// IncreasedByMacroFiles 是只做分支选择时已含诊断、宏中和后诊断条数更多的文件数。
+	// IncreasedByMacroFiles 是只做分支选择时已含诊断、宏中和（不放占位符）后诊断条数更多的文件数。
 	IncreasedByMacroFiles int `json:"increased_by_macro_files"`
+	// Placeholders 是全部 C/C++ 文件采纳的宏占位符总数。
+	Placeholders int `json:"placeholders"`
+	// PlaceholderSHA256 是全部宏占位符记录的稳定摘要。
+	PlaceholderSHA256 string `json:"placeholder_sha256"`
+	// FixedByPlaceholderFiles 是宏中和后仍含诊断、放置占位符后不含诊断的文件数。
+	FixedByPlaceholderFiles int `json:"fixed_by_placeholder_files"`
+	// NewDiagnosticByPlaceholderFiles 是宏中和后不含诊断、放置占位符后反而含诊断的文件数，必须为零。
+	NewDiagnosticByPlaceholderFiles int `json:"new_diagnostic_by_placeholder_files"`
+	// IncreasedByPlaceholderFiles 是宏中和后已含诊断、放置占位符后诊断条数更多的文件数。
+	IncreasedByPlaceholderFiles int `json:"increased_by_placeholder_files"`
 	// NonBlankLines 是全部纳入文件的非空行数，是行错误率的分母。
 	NonBlankLines int `json:"non_blank_lines"`
 	// Raw 是按原样解析时的错误规模。
 	Raw errorStats `json:"raw"`
 	// Conditional 是只做条件编译分支选择时的错误规模。
 	Conditional errorStats `json:"conditional"`
-	// Full 是完整预处理（分支选择加宏中和）后的错误规模，即默认解析结果。
+	// Neutralized 是分支选择加宏中和、不放占位符时的错误规模。
+	Neutralized errorStats `json:"neutralized"`
+	// Full 是完整预处理（分支选择、宏中和加宏占位符）后的错误规模，即默认解析结果。
 	Full errorStats `json:"full"`
 }
 

@@ -1,0 +1,6 @@
+rewrites 0
+unsupported 0
+too_long 0
+placeholders 2
+placeholder line=2 column=1 name=EXT_DEPRECATED form=omitted text="" defined=false
+placeholder line=3 column=1 name=EXT_INLINE_HINT form=omitted text="" defined=false

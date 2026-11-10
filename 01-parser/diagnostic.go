@@ -7,7 +7,7 @@ import (
 )
 
 // errorStats 前序遍历语法树，统计 ERROR 与 MISSING 节点的数量及其覆盖的源码字节数，
-// 用于 .h 头文件双解析择优。
+// 用于 .h 头文件双解析择优；不含错误的子树直接跳过。
 func errorStats(tree *ts.Tree) (count int, coveredBytes uint) {
 	root := tree.RootNode()
 	var walk func(n *ts.Node)
@@ -21,6 +21,8 @@ func errorStats(tree *ts.Tree) (count int, coveredBytes uint) {
 			if end >= start {
 				coveredBytes += end - start
 			}
+		} else if !n.HasError() {
+			return
 		}
 		for i := uint(0); i < n.ChildCount(); i++ {
 			walk(n.Child(i))

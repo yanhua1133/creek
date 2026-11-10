@@ -1,0 +1,6 @@
+rewrites 0
+unsupported 2
+too_long 0
+placeholders 2
+placeholder line=5 column=5 name=HANDLE_KIND form=statement text="HANDLE_KIND();" defined=true
+placeholder line=6 column=5 name=HANDLE_KIND form=statement text="HANDLE_KIND();" defined=true

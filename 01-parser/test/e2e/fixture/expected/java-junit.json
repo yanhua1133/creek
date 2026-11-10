@@ -1,5 +1,5 @@
 {
-  "test_purpose": "全量解析 JUnit 的 Java 源码，验证每个文件都生成语法树，并锁定完整 CST 与诊断；该项目仍有文件含语法错误，expected 只锁定当前输出以发现变化，不代表这些语法树正确，见 design/01-parser.md“E2E 语法错误现状”；同时锁定按原样、只做分支选择、完整预处理（分支选择加宏中和，宏定义索引取自项目全部受跟踪的宏定义文件，含排除目录）三种解析方式的含错文件数、错误行数、错误节点数，以及宏中和报告摘要；预处理使原本无诊断的文件新增诊断的两项计数必须为 0",
+  "test_purpose": "全量解析 JUnit 的 Java 源码，验证每个文件都生成语法树，并锁定完整 CST 与诊断；该项目仍有文件含语法错误，expected 只锁定当前输出以发现变化，不代表这些语法树正确，见 design/01-parser.md“E2E 语法错误现状”；同时锁定按原样、只做分支选择、宏中和（不放占位符，宏定义索引取自项目全部受跟踪的宏定义文件，含排除目录）、完整预处理（再放置宏占位符）四种解析方式的含错文件数、诊断条数、错误行数、错误节点数，以及宏中和报告与宏占位符摘要；预处理使原本无诊断的文件新增诊断的三项计数必须为 0",
   "project_id": "java-junit",
   "assertions": {
     "source_files": 1738,
@@ -29,6 +29,11 @@
     "fixed_by_macro_files": 0,
     "new_diagnostic_by_macro_files": 0,
     "increased_by_macro_files": 0,
+    "placeholders": 0,
+    "placeholder_sha256": "0095730dfa5ad06ec963288337510f4f1325fe463ad533ea98b272cbba21e49d",
+    "fixed_by_placeholder_files": 0,
+    "new_diagnostic_by_placeholder_files": 0,
+    "increased_by_placeholder_files": 0,
     "non_blank_lines": 189439,
     "raw": {
       "diagnostic_files": 6,
@@ -38,6 +43,13 @@
       "total_nodes": 1598382
     },
     "conditional": {
+      "diagnostic_files": 6,
+      "diagnostics": 12,
+      "error_lines": 10,
+      "error_nodes": 87,
+      "total_nodes": 1598382
+    },
+    "neutralized": {
       "diagnostic_files": 6,
       "diagnostics": 12,
       "error_lines": 10,

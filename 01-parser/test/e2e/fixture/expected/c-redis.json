@@ -1,18 +1,18 @@
 {
-  "test_purpose": "全量解析 Redis 的 C 与头文件，验证每个文件都生成语法树，并锁定完整 CST 与诊断；该项目仍有文件含语法错误，expected 只锁定当前输出以发现变化，不代表这些语法树正确，见 design/01-parser.md“E2E 语法错误现状”；同时锁定按原样、只做分支选择、完整预处理（分支选择加宏中和，宏定义索引取自项目全部受跟踪的宏定义文件，含排除目录）三种解析方式的含错文件数、错误行数、错误节点数，以及宏中和报告摘要；预处理使原本无诊断的文件新增诊断的两项计数必须为 0",
+  "test_purpose": "全量解析 Redis 的 C 与头文件，验证每个文件都生成语法树，并锁定完整 CST 与诊断；该项目仍有文件含语法错误，expected 只锁定当前输出以发现变化，不代表这些语法树正确，见 design/01-parser.md“E2E 语法错误现状”；同时锁定按原样、只做分支选择、宏中和（不放占位符，宏定义索引取自项目全部受跟踪的宏定义文件，含排除目录）、完整预处理（再放置宏占位符）四种解析方式的含错文件数、诊断条数、错误行数、错误节点数，以及宏中和报告与宏占位符摘要；预处理使原本无诊断的文件新增诊断的三项计数必须为 0",
   "project_id": "c-redis",
   "assertions": {
     "source_files": 278,
     "successful_trees": 278,
     "system_failures": 0,
     "total_bytes": 9226711,
-    "diagnostic_files": 32,
+    "diagnostic_files": 19,
     "diagnostic_files_by_extension": {
-      ".c": 30,
+      ".c": 17,
       ".h": 2
     },
-    "syntax_tree_sha256": "cc47566d5a737e010602b920de7b178aa85270482b6b1d5a6430fcd21e233a86",
-    "diagnostics_sha256": "67da91b52928c40ee67773cfa8c07a473758926ed7e77cc8304d061004fc2e76",
+    "syntax_tree_sha256": "f60472dbe1a920cf2e49b92f7fe25d08cefc7643f21c2f6fc3c068dc61bdd91f",
+    "diagnostics_sha256": "79ca9494c1d142fea630859949abb6e7f653c4256bf394b2e6452e709e8a9a2c",
     "preprocess_branches": 1013,
     "preprocess_taken_branches": 644,
     "preprocess_unknown_branches": 546,
@@ -20,7 +20,7 @@
     "preprocess_unterminated": 0,
     "preprocess_sha256": "b82ea8001b8f1ff0b9e827997f0832a78ef971dc253745e95da7d85f53a5ff0b",
     "new_diagnostic_files": 0,
-    "fixed_by_preprocess_files": 21,
+    "fixed_by_preprocess_files": 34,
     "increased_diagnostic_files": 0,
     "macro_index_files": 314,
     "macro_rewrites": 931,
@@ -30,6 +30,11 @@
     "fixed_by_macro_files": 11,
     "new_diagnostic_by_macro_files": 0,
     "increased_by_macro_files": 0,
+    "placeholders": 217,
+    "placeholder_sha256": "5e6b3e552df43a4f310ad89580534eb02f452631e0884dc88f7cd0bdc7e77446",
+    "fixed_by_placeholder_files": 13,
+    "new_diagnostic_by_placeholder_files": 0,
+    "increased_by_placeholder_files": 0,
     "non_blank_lines": 206778,
     "raw": {
       "diagnostic_files": 53,
@@ -45,12 +50,19 @@
       "error_nodes": 3399,
       "total_nodes": 1827984
     },
-    "full": {
+    "neutralized": {
       "diagnostic_files": 32,
       "diagnostics": 285,
       "error_lines": 285,
       "error_nodes": 481,
       "total_nodes": 1826038
+    },
+    "full": {
+      "diagnostic_files": 19,
+      "diagnostics": 60,
+      "error_lines": 60,
+      "error_nodes": 175,
+      "total_nodes": 1825049
     }
   }
 }

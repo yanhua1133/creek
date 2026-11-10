@@ -1,9 +1,7 @@
 (translation_unit
   (comment)
   (function_definition
-    type: (type_identifier)
-    (ERROR
-      (identifier))
+    type: (primitive_type)
     declarator: (function_declarator
       declarator: (identifier)
       parameters: (parameter_list

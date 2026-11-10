@@ -1,0 +1,5 @@
+rewrites 0
+unsupported 0
+too_long 0
+placeholders 1
+placeholder line=3 column=16 name=EXT_LIFETIME_BOUND form=omitted text="" defined=false

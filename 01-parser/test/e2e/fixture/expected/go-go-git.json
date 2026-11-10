@@ -1,5 +1,5 @@
 {
-  "test_purpose": "全量解析 go-git 的 Go 源码，验证全部文件生成无诊断语法树，并锁定完整 CST；同时锁定按原样、只做分支选择、完整预处理（分支选择加宏中和，宏定义索引取自项目全部受跟踪的宏定义文件，含排除目录）三种解析方式的含错文件数、错误行数、错误节点数，以及宏中和报告摘要；预处理使原本无诊断的文件新增诊断的两项计数必须为 0",
+  "test_purpose": "全量解析 go-git 的 Go 源码，验证全部文件生成无诊断语法树，并锁定完整 CST；同时锁定按原样、只做分支选择、宏中和（不放占位符，宏定义索引取自项目全部受跟踪的宏定义文件，含排除目录）、完整预处理（再放置宏占位符）四种解析方式的含错文件数、诊断条数、错误行数、错误节点数，以及宏中和报告与宏占位符摘要；预处理使原本无诊断的文件新增诊断的三项计数必须为 0",
   "project_id": "go-go-git",
   "assertions": {
     "source_files": 690,
@@ -27,6 +27,11 @@
     "fixed_by_macro_files": 0,
     "new_diagnostic_by_macro_files": 0,
     "increased_by_macro_files": 0,
+    "placeholders": 0,
+    "placeholder_sha256": "0d4c5ba26b82dea714b6d803efb605ef01e79d3ca5b6572c14a3a57e8c82230f",
+    "fixed_by_placeholder_files": 0,
+    "new_diagnostic_by_placeholder_files": 0,
+    "increased_by_placeholder_files": 0,
     "non_blank_lines": 131697,
     "raw": {
       "diagnostic_files": 0,
@@ -36,6 +41,13 @@
       "total_nodes": 1353223
     },
     "conditional": {
+      "diagnostic_files": 0,
+      "diagnostics": 0,
+      "error_lines": 0,
+      "error_nodes": 0,
+      "total_nodes": 1353223
+    },
+    "neutralized": {
       "diagnostic_files": 0,
       "diagnostics": 0,
       "error_lines": 0,

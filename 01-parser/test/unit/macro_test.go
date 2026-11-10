@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -86,7 +87,41 @@ func macroSnapshot(report *parser.MacroReport) string {
 	return b.String()
 }
 
-// TestMacroReportSnapshot 不带索引解析全部 C/C++ fixture，宏报告与 .macro golden 逐字节比较，只有本文件定义生效。
+// formName 返回占位符形态在快照中的名称。
+func formName(form parser.PlaceholderForm) string {
+	switch form {
+	case parser.PlaceholderExpression:
+		return "expression"
+	case parser.PlaceholderStatement:
+		return "statement"
+	case parser.PlaceholderDefinition:
+		return "definition"
+	case parser.PlaceholderOmitted:
+		return "omitted"
+	case parser.PlaceholderName:
+		return "name"
+	default:
+		return fmt.Sprintf("invalid(%d)", form)
+	}
+}
+
+// resultSnapshot 把宏中和报告和宏占位符序列化为逐行文本；没有占位符时只输出宏中和报告。
+func resultSnapshot(res parser.ParseResult) string {
+	var b strings.Builder
+	b.WriteString(macroSnapshot(res.Macros))
+	if len(res.Placeholders) == 0 {
+		return b.String()
+	}
+	fmt.Fprintf(&b, "placeholders %d\n", len(res.Placeholders))
+	for _, placeholder := range res.Placeholders {
+		fmt.Fprintf(&b, "placeholder line=%d column=%d name=%s form=%s text=%q defined=%t\n",
+			placeholder.Range.StartPoint.Row+1, placeholder.Range.StartPoint.Column+1, placeholder.Name,
+			formName(placeholder.Form), placeholder.Text, placeholder.Defined)
+	}
+	return b.String()
+}
+
+// TestMacroReportSnapshot 不带索引解析全部 C/C++ fixture，宏报告和宏占位符与 .macro golden 逐字节比较，只有本文件定义参与宏中和。
 func TestMacroReportSnapshot(t *testing.T) {
 	p := parser.New()
 	for _, path := range cFamilyFixtures(t) {
@@ -96,7 +131,7 @@ func TestMacroReportSnapshot(t *testing.T) {
 				t.Fatalf("解析失败: %v", err)
 			}
 			defer res.Tree.Close()
-			assertGolden(t, expectedPath(path, ".macro"), macroSnapshot(res.Macros))
+			assertGolden(t, expectedPath(path, ".macro"), resultSnapshot(res))
 		})
 	}
 }
@@ -112,7 +147,7 @@ func TestMacroIndexedSnapshot(t *testing.T) {
 				t.Fatalf("解析失败: %v", err)
 			}
 			defer res.Tree.Close()
-			assertGolden(t, expectedPath(path, ".indexed.macro"), macroSnapshot(res.Macros))
+			assertGolden(t, expectedPath(path, ".indexed.macro"), resultSnapshot(res))
 			assertGolden(t, expectedPath(path, ".indexed.sexp"), treeSexpr(t, res.Tree.Root()))
 			assertGolden(t, expectedPath(path, ".indexed.diag"), diagnosticsSnapshot(res.Diagnostics))
 		})
@@ -338,5 +373,86 @@ func TestMacroRewrittenNodeText(t *testing.T) {
 	}
 	if !strings.HasPrefix(string(text), "LIB_INLINE int c_twice") {
 		t.Errorf("函数定义文本应保留原始源码中的宏名，实际为 %q", text)
+	}
+}
+
+// placeholderFixed 是放置宏占位符后必须没有诊断、不放置时必须有诊断的 fixture。
+var placeholderFixed = []string{
+	"fixture/macro/placeholder/block_in_function.c",
+	"fixture/macro/placeholder/catch_def.cpp",
+	"fixture/macro/placeholder/expression_args.c",
+	"fixture/macro/placeholder/external_attr.cpp",
+	"fixture/macro/placeholder/initializer_list.c",
+	"fixture/macro/placeholder/struct_name.c",
+	"fixture/macro/placeholder/lock_annotation.cpp",
+	"fixture/macro/placeholder/enum_name.c",
+	"fixture/macro/placeholder/decl_annotation.cpp",
+	"fixture/macro/placeholder/switch_stmt.cpp",
+}
+
+// TestPlaceholderFixesErrors 验证宏占位符消除错误、SkipPlaceholders 可关闭，以及无错误文件和放置无效时不留下占位符。
+func TestPlaceholderFixesErrors(t *testing.T) {
+	p := parser.New()
+	for _, path := range placeholderFixed {
+		file := loadFixture(t, path)
+		res, err := p.Parse(context.Background(), file, parser.ParseOptions{CollectDiagnostics: true})
+		if err != nil {
+			t.Fatalf("解析失败 %s: %v", path, err)
+		}
+		if len(res.Diagnostics) != 0 || len(res.Placeholders) == 0 {
+			t.Errorf("%s 放置占位符后应无诊断且有占位符: 诊断=%d 占位符=%d", path, len(res.Diagnostics), len(res.Placeholders))
+		}
+		if !reflect.DeepEqual(res.Placeholders, res.Tree.Placeholders()) {
+			t.Errorf("%s ParseResult.Placeholders 与 SyntaxTree.Placeholders() 不一致", path)
+		}
+		res.Tree.Close()
+		skipped, err := p.Parse(context.Background(), file, parser.ParseOptions{CollectDiagnostics: true, SkipPlaceholders: true})
+		if err != nil {
+			t.Fatalf("解析失败 %s: %v", path, err)
+		}
+		if len(skipped.Diagnostics) == 0 || len(skipped.Placeholders) != 0 {
+			t.Errorf("%s SkipPlaceholders 时应有诊断且无占位符: 诊断=%d 占位符=%d", path, len(skipped.Diagnostics), len(skipped.Placeholders))
+		}
+		skipped.Tree.Close()
+	}
+	for path, wantDiagnostics := range map[string]bool{
+		"fixture/macro/placeholder/clean.cpp":         false,
+		"fixture/macro/placeholder/unrelated_error.c": true,
+	} {
+		res, err := p.Parse(context.Background(), loadFixture(t, path), parser.ParseOptions{CollectDiagnostics: true})
+		if err != nil {
+			t.Fatalf("解析失败 %s: %v", path, err)
+		}
+		if len(res.Placeholders) != 0 || (len(res.Diagnostics) != 0) != wantDiagnostics {
+			t.Errorf("%s 不应留下占位符，诊断存在应为 %t: 诊断=%d 占位符=%d", path, wantDiagnostics, len(res.Diagnostics), len(res.Placeholders))
+		}
+		res.Tree.Close()
+	}
+}
+
+// TestPlaceholderNodeText 验证占位符范围内的节点返回写入的文本，外层节点返回原始源码。
+func TestPlaceholderNodeText(t *testing.T) {
+	res, err := parser.New().Parse(context.Background(), loadFixture(t, "fixture/macro/placeholder/catch_def.cpp"), parser.ParseOptions{})
+	if err != nil {
+		t.Fatalf("解析失败: %v", err)
+	}
+	defer res.Tree.Close()
+	function, ok := findNode(t, res.Tree.Root(), "function_definition")
+	if !ok {
+		t.Fatal("未找到占位符生成的函数定义")
+	}
+	returnType, ok := findNode(t, function, "primitive_type")
+	if !ok {
+		t.Fatal("未找到占位符写入的 void")
+	}
+	if text, err := returnType.Text(); err != nil || string(text) != "void" {
+		t.Errorf("占位符写入的返回类型文本=%q err=%v，期望 \"void\"", text, err)
+	}
+	text, err := function.Text()
+	if err != nil {
+		t.Fatalf("读取函数定义文本失败: %v", err)
+	}
+	if !strings.HasPrefix(string(text), `TEST_CASE("parses macro", "[parser]") {`) {
+		t.Errorf("函数定义文本应为原始源码，实际为 %q", text)
 	}
 }
