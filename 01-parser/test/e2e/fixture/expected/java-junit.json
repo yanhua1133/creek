@@ -1,5 +1,5 @@
 {
-  "test_purpose": "全量解析 JUnit 的 Java 源码，验证每个文件都生成语法树，并锁定完整 CST 与诊断；该项目仍有文件含语法错误，expected 只锁定当前输出以发现变化，不代表这些语法树正确，见 design/01-parser.md“E2E 语法错误现状”",
+  "test_purpose": "全量解析 JUnit 的 Java 源码，验证每个文件都生成语法树，并锁定完整 CST 与诊断；该项目仍有文件含语法错误，expected 只锁定当前输出以发现变化，不代表这些语法树正确，见 design/01-parser.md“E2E 语法错误现状”；同时锁定按原样、只做分支选择、完整预处理（分支选择加宏中和，宏定义索引取自项目全部受跟踪的宏定义文件，含排除目录）三种解析方式的含错文件数、错误行数、错误节点数，以及宏中和报告摘要；预处理使原本无诊断的文件新增诊断的两项计数必须为 0",
   "project_id": "java-junit",
   "assertions": {
     "source_files": 1738,
@@ -7,7 +7,9 @@
     "system_failures": 0,
     "total_bytes": 7704902,
     "diagnostic_files": 6,
-    "diagnostic_files_by_extension": {".java": 6},
+    "diagnostic_files_by_extension": {
+      ".java": 6
+    },
     "syntax_tree_sha256": "de8a0726adcad7c991ea33f97c1cdf60edf061ecc47bb871301186013473e2e4",
     "diagnostics_sha256": "264f8e75065ba1ed12351106e54b91b0c8aef98deeb9f651234d03c19a3bc588",
     "preprocess_branches": 0,
@@ -16,9 +18,38 @@
     "preprocess_blanked_bytes": 0,
     "preprocess_unterminated": 0,
     "preprocess_sha256": "dfd7086a46ac040bf868e7ba4ca7e32e509be5b073dc13621bf0353ad4e43950",
-    "raw_diagnostic_files": 6,
-    "fixed_by_preprocess_files": 0,
     "new_diagnostic_files": 0,
-    "increased_diagnostic_files": 0
+    "fixed_by_preprocess_files": 0,
+    "increased_diagnostic_files": 0,
+    "macro_index_files": 0,
+    "macro_rewrites": 0,
+    "macro_unsupported": 0,
+    "macro_too_long": 0,
+    "macro_sha256": "dfd7086a46ac040bf868e7ba4ca7e32e509be5b073dc13621bf0353ad4e43950",
+    "fixed_by_macro_files": 0,
+    "new_diagnostic_by_macro_files": 0,
+    "increased_by_macro_files": 0,
+    "non_blank_lines": 189439,
+    "raw": {
+      "diagnostic_files": 6,
+      "diagnostics": 12,
+      "error_lines": 10,
+      "error_nodes": 87,
+      "total_nodes": 1598382
+    },
+    "conditional": {
+      "diagnostic_files": 6,
+      "diagnostics": 12,
+      "error_lines": 10,
+      "error_nodes": 87,
+      "total_nodes": 1598382
+    },
+    "full": {
+      "diagnostic_files": 6,
+      "diagnostics": 12,
+      "error_lines": 10,
+      "error_nodes": 87,
+      "total_nodes": 1598382
+    }
   }
 }

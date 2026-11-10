@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"sort"
 	"sync"
 
 	ts "github.com/tree-sitter/go-tree-sitter"
@@ -18,6 +19,10 @@ type syntaxTree struct {
 	path string
 	// content 是解析所用的源码内容，在树存活期间保持不可变，供节点取源码切片。
 	content []byte
+	// view 是实际交给 Tree-sitter 的解析视图，与 content 等长，只用于取宏改写范围内的节点文本。
+	view []byte
+	// rewrites 是按源码顺序排列、互不重叠的宏改写，完全落在其中的节点取 view 中的文本。
+	rewrites []MacroRewrite
 	// tree 是底层 Tree-sitter 树，关闭后置为 nil。
 	tree *ts.Tree
 	// closed 标记该语法树是否已关闭。
@@ -62,4 +67,13 @@ func (t *syntaxTree) Close() error {
 	}
 	t.closed = true
 	return nil
+}
+
+// textSource 返回节点 [start,end) 取文本所用的字节：完全落在一次宏改写范围内时为解析视图，否则为原始源码。
+func (t *syntaxTree) textSource(start, end uint) []byte {
+	i := sort.Search(len(t.rewrites), func(i int) bool { return t.rewrites[i].Range.StartByte > start }) - 1
+	if i >= 0 && end <= t.rewrites[i].Range.EndByte && len(t.view) == len(t.content) {
+		return t.view
+	}
+	return t.content
 }

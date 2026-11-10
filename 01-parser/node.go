@@ -135,7 +135,7 @@ func (n *node) FieldNameForChild(index int) (string, error) {
 	return out, err
 }
 
-// Text 返回当前节点覆盖的源码内容的只读副本。
+// Text 返回当前节点覆盖的源码内容的只读副本；完全落在一次宏改写范围内的节点返回写入的关键字。
 func (n *node) Text() ([]byte, error) {
 	var out []byte
 	err := n.access(func(raw *ts.Node) {
@@ -143,8 +143,9 @@ func (n *node) Text() ([]byte, error) {
 		if end > uint(len(n.owner.content)) || start > end {
 			return
 		}
+		source := n.owner.textSource(start, end)
 		buf := make([]byte, end-start)
-		copy(buf, n.owner.content[start:end])
+		copy(buf, source[start:end])
 		out = buf
 	})
 	return out, err

@@ -1,0 +1,4 @@
+rewrites 1
+unsupported 0
+too_long 0
+rewrite line=3 column=1 name=LIB_LEAK_FROM_C replacement="" definition=fixture/macro/lib/helper.c:2

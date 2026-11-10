@@ -68,6 +68,24 @@ type conditionalGroup struct {
 	anyTaken bool
 	// currentTaken 表示当前分支是否被保留。
 	currentTaken bool
+	// parentReachable 表示该组所在区域是否可达，即没有被确定为假的条件排除。
+	parentReachable bool
+	// anyTrue 表示该组是否已有条件确定为真的分支。
+	anyTrue bool
+	// currentReachable 表示当前分支是否可达：条件不为假，且同组前面没有确定为真的分支。
+	currentReachable bool
+}
+
+// defineEvent 记录可达区域中的一条 #define 或 #undef 指令，供宏定义索引使用。
+type defineEvent struct {
+	// keyword 是指令名称：define 或 undef。
+	keyword string
+	// rest 是指令名称之后的原始文本，包含续行。
+	rest string
+	// line 是指令所在行号，从 1 开始。
+	line int
+	// taken 表示指令是否位于分支选择保留的区域。
+	taken bool
 }
 
 // conditionalScanner 按词法扫描源码，识别条件编译指令并生成解析视图。
@@ -86,6 +104,10 @@ type conditionalScanner struct {
 	groups []conditionalGroup
 	// report 是正在生成的报告。
 	report PreprocessReport
+	// collectDefines 为真时把可达区域中的 #define 和 #undef 记入 defines。
+	collectDefines bool
+	// defines 是按源码顺序记录的可达宏定义指令。
+	defines []defineEvent
 }
 
 // newConditionalScanner 创建扫描器并初始化 __cplusplus 的定义状态。
@@ -142,6 +164,23 @@ var targetUndefined = []string{
 	"__APPLE__", "__MACH__", "__FreeBSD__", "__OpenBSD__", "__NetBSD__", "__DragonFly__", "__sun", "__SVR4",
 	"_AIX", "__HAIKU__", "__ANDROID__", "__EMSCRIPTEN__", "__wasm__", "__clang__", "__INTEL_COMPILER",
 	"__aarch64__", "__arm__", "__i386__", "__powerpc__", "__ppc64__", "__s390x__", "__riscv",
+}
+
+// scanDefines 按指定语言扫描源码，返回可达区域中按源码顺序排列的 #define 和 #undef 指令。
+func scanDefines(content []byte, lang Language) []defineEvent {
+	s := newConditionalScanner(content, lang)
+	s.collectDefines = true
+	s.run()
+	return s.defines
+}
+
+// reachable 报告当前位置是否可达，即没有被确定为假的条件排除。
+func (s *conditionalScanner) reachable() bool {
+	if len(s.groups) == 0 {
+		return true
+	}
+	top := s.groups[len(s.groups)-1]
+	return top.parentReachable && top.currentReachable
 }
 
 // active 报告当前位置是否保留在解析视图中。
@@ -215,7 +254,11 @@ func (s *conditionalScanner) blankIfInactive(start, end int) {
 
 // token 返回从 i 开始的一个词法单元的结束偏移，正确跳过注释、字符串、字符字面量、原始字符串和数字。
 func (s *conditionalScanner) token(i int) int {
-	content := s.content
+	return tokenEnd(s.content, i, s.cpp)
+}
+
+// tokenEnd 返回从 i 开始的一个词法单元的结束偏移；cpp 为真时识别 C++ 原始字符串。
+func tokenEnd(content []byte, i int, cpp bool) int {
 	n := len(content)
 	c := content[i]
 	switch {
@@ -232,7 +275,7 @@ func (s *conditionalScanner) token(i int) int {
 		for end < n && isIdentPart(content[end]) {
 			end++
 		}
-		if s.cpp && end < n && content[end] == '"' {
+		if cpp && end < n && content[end] == '"' {
 			switch string(content[i:end]) {
 			case "R", "u8R", "uR", "UR", "LR":
 				if rawEnd, ok := rawStringEnd(content, end); ok {
@@ -257,7 +300,14 @@ func (s *conditionalScanner) directive(start int) int {
 		condition := normalizeCondition(rest)
 		value := s.evaluate(keyword, condition)
 		taken := parentActive && value != ConditionFalse
-		s.groups = append(s.groups, conditionalGroup{parentActive: parentActive, anyTaken: taken, currentTaken: taken})
+		s.groups = append(s.groups, conditionalGroup{
+			parentActive:     parentActive,
+			anyTaken:         taken,
+			currentTaken:     taken,
+			parentReachable:  s.reachable(),
+			anyTrue:          value == ConditionTrue,
+			currentReachable: value != ConditionFalse,
+		})
 		s.record(start, end, keyword, condition, value, taken)
 		s.blank(start, end)
 	case "elif", "else":
@@ -275,6 +325,8 @@ func (s *conditionalScanner) directive(start int) int {
 		taken := group.parentActive && !group.anyTaken && value != ConditionFalse
 		group.currentTaken = taken
 		group.anyTaken = group.anyTaken || taken
+		group.currentReachable = !group.anyTrue && value != ConditionFalse
+		group.anyTrue = group.anyTrue || value == ConditionTrue
 		s.record(start, end, keyword, condition, value, taken)
 		s.blank(start, end)
 	case "endif":
@@ -284,6 +336,9 @@ func (s *conditionalScanner) directive(start int) int {
 		s.groups = s.groups[:len(s.groups)-1]
 		s.blank(start, end)
 	default:
+		if s.collectDefines && (keyword == "define" || keyword == "undef") && s.reachable() {
+			s.defines = append(s.defines, defineEvent{keyword: keyword, rest: rest, line: int(s.point(start).Row) + 1, taken: s.active()})
+		}
 		if !s.active() {
 			s.blank(start, end)
 			return end

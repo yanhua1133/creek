@@ -1,28 +1,57 @@
 {
-  "test_purpose": "全量解析 Protobuf 的 C++ 与头文件，验证每个文件都生成语法树，并锁定完整 CST 与诊断；该项目仍有文件含语法错误，expected 只锁定当前输出以发现变化，不代表这些语法树正确，见 design/01-parser.md“E2E 语法错误现状”",
+  "test_purpose": "全量解析 Protobuf 的 C++ 与头文件，验证每个文件都生成语法树，并锁定完整 CST 与诊断；该项目仍有文件含语法错误，expected 只锁定当前输出以发现变化，不代表这些语法树正确，见 design/01-parser.md“E2E 语法错误现状”；同时锁定按原样、只做分支选择、完整预处理（分支选择加宏中和，宏定义索引取自项目全部受跟踪的宏定义文件，含排除目录）三种解析方式的含错文件数、错误行数、错误节点数，以及宏中和报告摘要；预处理使原本无诊断的文件新增诊断的两项计数必须为 0",
   "project_id": "cpp-protobuf",
   "assertions": {
     "source_files": 1095,
     "successful_trees": 1095,
     "system_failures": 0,
     "total_bytes": 19826161,
-    "diagnostic_files": 372,
+    "diagnostic_files": 185,
     "diagnostic_files_by_extension": {
-      ".cc": 107,
-      ".h": 264,
+      ".cc": 89,
+      ".h": 95,
       ".hpp": 1
     },
-    "syntax_tree_sha256": "0dbeca1eb20c7bc0cefd14563ebca7f66942ce0d0a037728cb887c8c2dc6e77e",
-    "diagnostics_sha256": "04c672f820aa410e5aa1df40bb4ffd61719895dc4810a4c08e889c6a98681173",
+    "syntax_tree_sha256": "0588a33938d92a782a31817b3c681154c1209c5364bbaf93fd7f07cf8d4ab626",
+    "diagnostics_sha256": "e88e792809d3504d4434f934111dff3f502d24fd0c5f77853dd886cc954d594e",
     "preprocess_branches": 5686,
-    "preprocess_taken_branches": 3546,
+    "preprocess_taken_branches": 3601,
     "preprocess_unknown_branches": 3262,
-    "preprocess_blanked_bytes": 1589923,
+    "preprocess_blanked_bytes": 1586897,
     "preprocess_unterminated": 0,
-    "preprocess_sha256": "cf5f8100381c50b6d8648fee061e05faf0364afb55f8fac1f01a3825a264f593",
-    "raw_diagnostic_files": 407,
-    "fixed_by_preprocess_files": 35,
+    "preprocess_sha256": "489670ee3ad45ba8459a63f700e5ca5c514b5602d63a8360b9bdfe22fa130a70",
     "new_diagnostic_files": 0,
-    "increased_diagnostic_files": 3
+    "fixed_by_preprocess_files": 222,
+    "increased_diagnostic_files": 0,
+    "macro_index_files": 627,
+    "macro_rewrites": 14897,
+    "macro_unsupported": 12722,
+    "macro_too_long": 0,
+    "macro_sha256": "31a2563240b230bce4ee575e10117603282f6b568ad2aa503242380143af6948",
+    "fixed_by_macro_files": 187,
+    "new_diagnostic_by_macro_files": 0,
+    "increased_by_macro_files": 0,
+    "non_blank_lines": 446475,
+    "raw": {
+      "diagnostic_files": 407,
+      "diagnostics": 25768,
+      "error_lines": 88279,
+      "error_nodes": 845280,
+      "total_nodes": 4323402
+    },
+    "conditional": {
+      "diagnostic_files": 372,
+      "diagnostics": 18699,
+      "error_lines": 18378,
+      "error_nodes": 64429,
+      "total_nodes": 3977591
+    },
+    "full": {
+      "diagnostic_files": 185,
+      "diagnostics": 2812,
+      "error_lines": 3124,
+      "error_nodes": 19722,
+      "total_nodes": 3951763
+    }
   }
 }
