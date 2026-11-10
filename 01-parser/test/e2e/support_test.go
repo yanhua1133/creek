@@ -86,6 +86,8 @@ type parserAssertions struct {
 type errorStats struct {
 	// DiagnosticFiles 是含 ERROR 或 MISSING 节点的文件数。
 	DiagnosticFiles int `json:"diagnostic_files"`
+	// Diagnostics 是诊断总条数；单个文件的统计中用于比较诊断是否增多。
+	Diagnostics int `json:"diagnostics"`
 	// ErrorLines 是被 ERROR 节点覆盖或含 MISSING 节点的非空行数。
 	ErrorLines int `json:"error_lines"`
 	// ErrorNodes 是位于 ERROR 或 MISSING 子树中的语法树节点数，含匿名节点。

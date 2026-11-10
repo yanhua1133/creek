@@ -909,6 +909,7 @@ protobuf 的 `objectivec/` 目录是 Objective-C 源码，之前未被排除，4
 - ✅ 回归：E2E 抽查发现函数式宏回退到未保留的空定义会删除可正常解析的调用（redis `debugServerAssert` 46 处、protobuf `PROTOBUF_ASSUME` 61 处），规则改为函数式宏只用保留的定义；回归 fixture `fixture/macro/lib/regression/debug_assert.c` 在旧逻辑下失败、新逻辑下通过。
 - ✅ 节点文本：复查发现宏改写生成的关键字节点 `Text` 返回截断的宏名（如 `LIB_IN`），改为完全落在改写范围内的节点返回写入的关键字；`TestMacroRewrittenNodeText` 先失败后通过；E2E 只有 redis、protobuf 的语法树摘要变化，其余计数与摘要不变。
 - ✅ 宏中和后的项目级验证：`go build`、`go vet`、`gofmt`、Parser 与 Common AST 单元测试、`go test -race` 单元测试、Parser 与 Common AST E2E、Parser 资源基线 E2E、`go test -race -tags=e2e ./01-parser/test/e2e/` 全部通过。
+- ✅ 回归：E2E 比较“诊断是否增多”误用了每个文件的含错标记（只有 0 或 1），该项检查从未生效；改为比较诊断条数，expected 增加三种解析方式的诊断总条数（protobuf 25768、18699、2812）。修正后诊断增多的文件数仍为 0。
 
 ### 实现与验证说明
 

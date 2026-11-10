@@ -30,18 +30,21 @@
     "non_blank_lines": 454158,
     "raw": {
       "diagnostic_files": 0,
+      "diagnostics": 0,
       "error_lines": 0,
       "error_nodes": 0,
       "total_nodes": 4438252
     },
     "conditional": {
       "diagnostic_files": 0,
+      "diagnostics": 0,
       "error_lines": 0,
       "error_nodes": 0,
       "total_nodes": 4438252
     },
     "full": {
       "diagnostic_files": 0,
+      "diagnostics": 0,
       "error_lines": 0,
       "error_nodes": 0,
       "total_nodes": 4438252

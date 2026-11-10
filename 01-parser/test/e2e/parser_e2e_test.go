@@ -131,9 +131,9 @@ func parseAll(t *testing.T, parserInstance parser.Parser, repositoryDirectory st
 		addErrorStats(&metrics.Assertions.Raw, raw)
 		addErrorStats(&metrics.Assertions.Conditional, conditional)
 		addErrorStats(&metrics.Assertions.Full, full.stats)
-		compareDiagnostics(t, relative, raw.DiagnosticFiles, full.stats.DiagnosticFiles,
+		compareDiagnostics(t, relative, raw.Diagnostics, full.stats.Diagnostics,
 			&metrics.Assertions.FixedByPreprocessFiles, &metrics.Assertions.NewDiagnosticFiles, &metrics.Assertions.IncreasedDiagnosticFiles, "预处理")
-		compareDiagnostics(t, relative, conditional.DiagnosticFiles, full.stats.DiagnosticFiles,
+		compareDiagnostics(t, relative, conditional.Diagnostics, full.stats.Diagnostics,
 			&metrics.Assertions.FixedByMacroFiles, &metrics.Assertions.NewDiagnosticByMacroFiles, &metrics.Assertions.IncreasedByMacroFiles, "宏中和")
 		if full.stats.DiagnosticFiles != 0 {
 			metrics.Assertions.DiagnosticFiles++
@@ -170,7 +170,7 @@ func buildProjectMacroIndex(t *testing.T, repositoryRoot string, project e2etest
 	return parser.BuildMacroIndex(files), len(files)
 }
 
-// compareDiagnostics 比较同一文件在基准方式和完整预处理下的诊断条数，分别计入消除、新增和增多计数。
+// compareDiagnostics 比较同一文件在基准方式和完整预处理下的诊断条数（不是含错标记），分别计入消除、新增和增多计数。
 func compareDiagnostics(t *testing.T, relative string, before, after int, fixed, added, increased *int, stage string) {
 	t.Helper()
 	switch {
@@ -212,6 +212,7 @@ func percent(part, total int) float64 {
 // addErrorStats 把单个文件的错误规模累加到项目统计。
 func addErrorStats(total *errorStats, file errorStats) {
 	total.DiagnosticFiles += file.DiagnosticFiles
+	total.Diagnostics += file.Diagnostics
 	total.ErrorLines += file.ErrorLines
 	total.ErrorNodes += file.ErrorNodes
 	total.TotalNodes += file.TotalNodes
@@ -248,6 +249,7 @@ func parseErrorStats(t *testing.T, parserInstance parser.Parser, file parser.Sou
 // treeErrorStats 遍历语法树，统计错误子树节点数、节点总数和错误非空行数；diagnostics 为该文件的诊断条数。
 func treeErrorStats(root parser.Node, blank []bool, diagnostics int) (errorStats, error) {
 	stats := errorStats{}
+	stats.Diagnostics = diagnostics
 	if diagnostics != 0 {
 		stats.DiagnosticFiles = 1
 	}
